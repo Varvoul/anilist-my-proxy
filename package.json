@@ -1,0 +1,25 @@
+{
+  "name": "anilist-my-proxy",
+  "version": "1.0.0",
+  "description": "Categorized AniList GraphQL proxy with paginated endpoints for currently-airing, top-airing, trending, upcoming, recently-completed, most-favourite, new-added, and popular anime. Returns both AniList id and MyAnimeList idMal.",
+  "private": true,
+  "license": "MIT",
+  "author": "Varvoul",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod",
+    "test:endpoints": "node scripts/test-endpoints.js"
+  },
+  "keywords": [
+    "anilist",
+    "anilist-api",
+    "proxy",
+    "anime",
+    "graphql",
+    "vercel",
+    "serverless"
+  ]
+}
