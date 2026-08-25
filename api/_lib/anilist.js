@@ -302,8 +302,11 @@ function buildHandler(category) {
 
       const data = await fetchAnilist(cleanVars);
       const page = data.Page;
+      const pageInfo = page.pageInfo;
+      const media = page.media;
 
-      return jsonResponse(res, 200, {
+      // Build the response body
+      const body = {
         ok: true,
         category: category.name,
         description: category.description,
@@ -328,10 +331,44 @@ function buildHandler(category) {
           averageScore_greater: cleanVars.averageScore_greater || null,
           averageScore_lesser: cleanVars.averageScore_lesser || null,
         },
-        pagination: page.pageInfo,
-        count: page.media.length,
-        data: page.media,
-      });
+        pagination: pageInfo,
+        count: media.length,
+        data: media,
+      };
+
+      // Helpful hint when the user paginated past the end of results.
+      // AniList's `total` field is capped at 5000 and can be misleading,
+      // so we check the *actual* end-of-data signal: hasNextPage=false AND
+      // currentPage > 1 AND no data returned (or currentPage > lastPage).
+      const currentPage = pageInfo.currentPage || cleanVars.page;
+      const lastPage = pageInfo.lastPage;
+      const hasNext = pageInfo.hasNextPage;
+      if (
+        media.length === 0 &&
+        currentPage > 1 &&
+        hasNext === false
+      ) {
+        // AniList's lastPage can be wrong (derived from capped total), so the
+        // *previous* page is the most reliable suggestion — it's the last
+        // page we know existed and had data, OR if even that was empty, fall
+        // back to page 1 which always has data on a non-empty category.
+        const prevPage = Math.max(1, currentPage - 1);
+        body.hint =
+          `Requested page ${currentPage} returned no results because you have paginated past the end of the data. ` +
+          `Try ?page=1 (always safe) or ?page=${prevPage} (the previous page, which is likely the last one with data). ` +
+          `Tip: trust \`pagination.hasNextPage\` rather than \`lastPage\` — AniList caps \`total\` at 5000, so \`lastPage\` can be inaccurate.`;
+      } else if (
+        media.length === 0 &&
+        currentPage > 1 &&
+        lastPage &&
+        currentPage > lastPage
+      ) {
+        body.hint =
+          `Requested page ${currentPage} is past the last page (${lastPage}). ` +
+          `Try ?page=${lastPage} or ?page=1.`;
+      }
+
+      return jsonResponse(res, 200, body);
     } catch (err) {
       console.error(`[${category.name}] error:`, err.message);
       const status = err.status || 500;
