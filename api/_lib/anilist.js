@@ -63,6 +63,7 @@ query (
       id
       idMal
       title { romaji english native userPreferred }
+      description(asHtml: false)
       coverImage { large extraLarge medium color }
       bannerImage
       episodes
@@ -83,6 +84,7 @@ query (
       nextAiringEpisode { airingAt episode timeUntilAiring }
       genres
       synonyms
+      tags { id name rank isMediaSpoiler }
       studios(isMain: true) { nodes { id name isAnimationStudio } }
       siteUrl
       trailer { id site thumbnail }
