@@ -13,6 +13,7 @@ Every endpoint returns paginated anime data with **both the AniList `id` and the
 | `/api/new-releases` | — | START_DATE_DESC | Newest premieres by start date |
 | `/api/trending-today` | RELEASING | TRENDING_DESC | Trending on AniList in the last 24h |
 | `/api/trending-week` | RELEASING | POPULARITY_DESC | Released in last 7 days, sorted by popularity |
+| `/api/trending-week-flex` | — | POPULARITY_DESC | Same as `/trending-week` but without `status=RELEASING` — always returns data |
 | `/api/trending-month` | RELEASING | POPULARITY_DESC | Released in last 30 days, sorted by popularity |
 | `/api/upcoming` | NOT_YET_RELEASED | POPULARITY_DESC | Scheduled for future release |
 | `/api/recently-completed` | FINISHED | END_DATE_DESC | Most-recently-finished → oldest |

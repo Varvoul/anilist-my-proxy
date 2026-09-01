@@ -286,7 +286,16 @@ function buildHandler(category) {
             : category.applyWindow === "month"
             ? fuzzyDateIntDaysAgo(30)
             : null),
-        startDate_lesser: parsed.startDate_lesser || defaults.startDate_lesser || null,
+        // When a window filter is applied, also cap the upper bound at "tomorrow"
+        // so we only get anime that have ACTUALLY started airing in the window
+        // (excludes upcoming premieres that haven't begun yet). For the strict
+        // trending-week / trending-month endpoints this is a no-op because their
+        // status=RELEASING filter already excludes NOT_YET_RELEASED, but for
+        // trending-week-flex (which has no status filter) it's essential.
+        startDate_lesser:
+          parsed.startDate_lesser ||
+          defaults.startDate_lesser ||
+          (category.applyWindow ? fuzzyDateIntDaysAgo(-1) : null),
         endDate_greater: parsed.endDate_greater || defaults.endDate_greater || null,
         endDate_lesser: parsed.endDate_lesser || defaults.endDate_lesser || null,
         averageScore_greater: parsed.averageScore_greater || defaults.averageScore_greater || null,

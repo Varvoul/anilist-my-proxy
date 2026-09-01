@@ -22,6 +22,7 @@ const ENDPOINTS = [
   "/api/new-releases",
   "/api/trending-today",
   "/api/trending-week",
+  "/api/trending-week-flex",
   "/api/trending-month",
   "/api/upcoming",
   "/api/recently-completed",

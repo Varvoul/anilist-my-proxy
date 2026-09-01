@@ -9,6 +9,7 @@ const CATEGORIES = [
   { path: "/api/new-releases",      defaults: { sort: ["START_DATE_DESC"] },                                description: "Newest premieres by start date, across all statuses." },
   { path: "/api/trending-today",    defaults: { status: "RELEASING",          sort: ["TRENDING_DESC"] },    description: "Trending on AniList in the last 24h." },
   { path: "/api/trending-week",     defaults: { status: "RELEASING",          sort: ["POPULARITY_DESC"] },  description: "Anime released in the last 7 days, sorted by popularity." },
+  { path: "/api/trending-week-flex", defaults: { sort: ["POPULARITY_DESC"] },                                 description: "Same as /trending-week but without status=RELEASING — always returns data." },
   { path: "/api/trending-month",    defaults: { status: "RELEASING",          sort: ["POPULARITY_DESC"] },  description: "Anime released in the last 30 days, sorted by popularity." },
   { path: "/api/upcoming",          defaults: { status: "NOT_YET_RELEASED",   sort: ["POPULARITY_DESC"] },  description: "Anime scheduled for future release." },
   { path: "/api/recently-completed", defaults: { status: "FINISHED",          sort: ["END_DATE_DESC"] },    description: "Recently completed anime, newest finished first." },
