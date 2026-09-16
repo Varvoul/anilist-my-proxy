@@ -96,13 +96,18 @@ query (
 // -----------------------------------------------------------------------------
 // HTTP helpers
 // -----------------------------------------------------------------------------
-function jsonResponse(res, status, body) {
+function jsonResponse(res, status, body, opts) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300");
+  // Category endpoints keep the 5-minute cache; item endpoints (/full,
+  // /episodes) pass their own 4-hour CDN cache policy via `opts.cacheControl`.
+  res.setHeader(
+    "Cache-Control",
+    (opts && opts.cacheControl) || "public, max-age=60, s-maxage=300"
+  );
   res.end(JSON.stringify(body));
   return;
 }

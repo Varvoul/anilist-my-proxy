@@ -18,6 +18,37 @@ const CATEGORIES = [
   { path: "/api/popular",           defaults: { sort: ["POPULARITY_DESC"] },                                description: "Most popular anime of all time." },
 ];
 
+const ITEM_ENDPOINTS = [
+  {
+    path: "/api/{id}/full",
+    description: "Full Jikan (MyAnimeList API v4) style metadata for one anime, fetched from AniList.",
+    id: "A MyAnimeList id OR an AniList id (auto-detected). Force with ?idType=anilist|mal.",
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/11061/full",
+      "/api/52991/full",
+      "/api/21/full?idType=mal",
+    ],
+  },
+  {
+    path: "/api/{id}/episodes",
+    description: "Jikan-style episode list for one anime (titles, thumbnails, streaming url, aired times).",
+    id: "A MyAnimeList id OR an AniList id (auto-detected). Force with ?idType=anilist|mal.",
+    queryParameters: [
+      { name: "page",    type: "Int", default: 1,  description: "Page number (1-indexed)." },
+      { name: "perPage", type: "Int", default: 50, description: "Episodes per page (1-50; 50 is AniList's maximum supported page size)." },
+      { name: "idType",  type: "Enum", default: null, description: "anilist or mal — force how the numeric id is interpreted." },
+      { name: "refresh", type: "Bool", default: false, description: "true/1 bypasses the 4h cache and refetches from AniList." },
+    ],
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/11061/episodes",
+      "/api/21/episodes?page=2&perPage=10",
+      "/api/154587/episodes?perPage=5",
+    ],
+  },
+];
+
 const QUERY_PARAMS = [
   { name: "page",            type: "Int",    default: 1,    description: "Page number (1-indexed)." },
   { name: "perPage",         type: "Int",    default: 20,   description: "Items per page (1-50)." },
@@ -50,10 +81,11 @@ module.exports = (req, res) => {
   return jsonResponse(res, 200, {
     ok: true,
     name: "anilist-my-proxy",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
-      "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry.",
+      "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry. Item endpoints /api/{id}/full and /api/{id}/episodes accept a MAL id OR an AniList id and return Jikan-style data.",
     categories: CATEGORIES,
+    itemEndpoints: ITEM_ENDPOINTS,
     queryParameters: QUERY_PARAMS,
     exampleUsage: [
       "/api/currently-airing?page=1&perPage=20",

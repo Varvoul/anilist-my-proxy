@@ -118,8 +118,50 @@ async function main() {
     ok ? pass++ : fail++;
   }
 
+  console.log(colors.cyan("\nItem endpoints (/full + /episodes):\n"));
+  const itemOk = await testItemEndpoints();
+  itemOk ? pass++ : fail++;
+
   console.log(colors.cyan(`\nResult: ${colors.green(pass + " passed")}, ${fail ? colors.red(fail + " failed") : colors.green("0 failed")}\n`));
   process.exit(fail ? 1 : 0);
+}
+
+// Tests the dual-ID item endpoints. Returns true if everything passed.
+async function testItemEndpoints() {
+  let allOk = true;
+  const step = (ok, label, detail = "") => {
+    if (!ok) allOk = false;
+    console.log((ok ? colors.green("OK  ") : colors.red("FAIL")) + " " + label + colors.dim(detail ? `  ${detail}` : ""));
+  };
+
+  // 1. id valid as BOTH id types (HxH 2011: AniList 11061 = MAL 11061)
+  let r = await callEndpoint("/api/11061/full");
+  step(r.status === 200 && r.json.ok, "/api/11061/full -> 200", `status=${r.status}`);
+  const d = r.json && r.json.data;
+  step(d && d.mal_id === 11061 && d.anilist_id === 11061, "data.mal_id + data.anilist_id", `mal_id=${d && d.mal_id}`);
+  step(r.json && r.json.detected && r.json.detected.idType === "both", "detected.idType=both");
+  step(d && Array.isArray(d.titles) && Array.isArray(d.genres) && Array.isArray(d.studios) && Array.isArray(d.tags), "titles/genres/studios/tags arrays");
+  step(d && d.aired && typeof d.aired.string === "string", "aired.string", d && d.aired && d.aired.string);
+  step(d && d.score > 5 && d.score <= 10 && d.members > 1000, "score/members", `score=${d && d.score} members=${d && d.members}`);
+  step(d && d.images && d.images.jpg && d.images.banner, "images incl. banner");
+
+  // 2. MAL-only id (52991 = Sousou no Frieren; AniList 52991 does not exist)
+  r = await callEndpoint("/api/52991/full");
+  step(r.status === 200 && r.json.detected && r.json.detected.idType === "mal" && /Frieren/.test(r.json.data.title), "/api/52991/full -> MAL id resolution", JSON.stringify(r.json.detected || {}).slice(0, 140));
+
+  // 3. episodes with pagination
+  r = await callEndpoint("/api/154587/episodes", "page=2&perPage=5");
+  const p = r.json && r.json.pagination;
+  step(r.status === 200 && p && p.current_page === 2 && p.items && p.items.per_page === 5, "/api/154587/episodes?page=2&perPage=5", JSON.stringify(p || {}));
+  const eps = (r.json && r.json.data) || [];
+  step(eps.length === 5 && eps[0].mal_id === 6 && eps[4].mal_id === 10, "episodes 6-10 on page 2", eps.map((e) => e.mal_id).join(","));
+  step(eps[0] && "aired" in eps[0] && "score" in eps[0] && "duration" in eps[0], "episode fields present");
+
+  // 4. 404 path
+  r = await callEndpoint("/api/99999999/full");
+  step(r.status === 404 && r.json.ok === false, "/api/99999999/full -> 404");
+
+  return allOk;
 }
 
 main().catch((e) => {
