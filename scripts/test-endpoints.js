@@ -205,9 +205,9 @@ async function testSourceRoutes() {
   step(r.status === 200 && r.json.data.mal_id === 21405 && r.json.data.title_romaji !== anilistTitle, "/api/mal/21405/full -> the OTHER show (no ambiguity)", r.json && `${r.json.data && r.json.data.title_romaji}`);
 
   // 4. episodes on source routes: pagination identical to the generic route
-  r = await callEndpoint("/api/mal/154587/episodes", "page=2&perPage=5");
+  r = await callEndpoint("/api/mal/52991/episodes", "page=2&perPage=5");
   const p = r.json && r.json.pagination;
-  step(r.status === 200 && p && p.current_page === 2 && p.items.per_page === 5, "/api/mal/154587/episodes?page=2&perPage=5", JSON.stringify(p || {}));
+  step(r.status === 200 && p && p.current_page === 2 && p.items.per_page === 5, "/api/mal/52991/episodes?page=2&perPage=5", JSON.stringify(p || {}));
   r = await callEndpoint("/api/anilist/11061/episodes", "perPage=3");
   step(r.status === 200 && r.json.data.length === 3 && !("score" in r.json.data[0]), "/api/anilist/11061/episodes?perPage=3 -> 3 episodes, no score field");
 
