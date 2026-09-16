@@ -215,19 +215,37 @@ function unixToIso(unix) {
 // Media-ish builders
 // ---------------------------------------------------------------------------
 
+// Jikan's Default title is the romaji title. AniList's `userPreferred` can
+// differ (e.g. Chinese-origin shows where it is the English title), so romaji
+// always wins here — falling back to userPreferred when romaji is absent.
 function buildTitles(title, synonyms) {
   const titles = [];
-  if (title.userPreferred) titles.push({ type: "Default", title: title.userPreferred });
-  if (title.english) titles.push({ type: "English", title: title.english });
-  if (title.native) titles.push({ type: "Japanese", title: title.native });
-  for (const syn of synonyms || []) titles.push({ type: "Synonym", title: syn });
+  const romaji = title.romaji || title.userPreferred || null;
+  if (romaji) titles.push({ type: "Default", title: romaji });
+  const seen = new Set();
+  for (const t of titles) seen.add(t.title);
+  if (title.english && !seen.has(title.english)) {
+    seen.add(title.english);
+    titles.push({ type: "English", title: title.english });
+  }
+  if (title.native && !seen.has(title.native)) {
+    seen.add(title.native);
+    titles.push({ type: "Japanese", title: title.native });
+  }
+  for (const syn of synonyms || []) {
+    if (seen.has(syn)) continue; // don't repeat romaji/english/native as Synonym
+    seen.add(syn);
+    titles.push({ type: "Synonym", title: syn });
+  }
   return titles;
 }
 
 function buildImages(coverImage, bannerImage) {
   if (!coverImage) return null;
+  // extraLarge is AniList's highest-quality cover and is used as the default
+  // image_url, matching how Jikan serves MAL's largest standard cover.
   const jpg = {
-    image_url: coverImage.large || null,
+    image_url: coverImage.extraLarge || coverImage.large || null,
     small_image_url: coverImage.medium || null,
     large_image_url: coverImage.extraLarge || coverImage.large || null,
   };
@@ -352,6 +370,8 @@ function buildTaxonomies(genres, tags, studioEdges) {
     else producersOut.push(entry);
   }
 
+  // NOTE: no licensors array — AniList has no licensor data at all, so the
+  // field is omitted entirely instead of returning a meaningless empty list.
   return {
     genres: genresOut,
     explicit_genres: explicitOut,
@@ -359,7 +379,6 @@ function buildTaxonomies(genres, tags, studioEdges) {
     demographics: demographicsOut,
     producers: producersOut,
     studios: studiosOut,
-    licensors: [], // AniList does not provide licensor data
   };
 }
 

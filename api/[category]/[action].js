@@ -1,6 +1,8 @@
 // GET /api/{id}/full  and  GET /api/{id}/episodes
-// Item-level endpoints for a single anime, addressed by either a MyAnimeList
-// id or an AniList id (auto-detected — see api/_lib/media.js).
+// Generic item-level routes: the numeric id is auto-detected as a MyAnimeList
+// id or an AniList id (see api/_lib/media.js). Explicit-source alternatives:
+// /api/mal/{mal_id}/... and /api/anilist/{anilist_id}/... (recommended —
+// deterministic, no ambiguity).
 //
 // Routing note: this lives at api/[category]/[action].js because Vercel
 // requires the first dynamic segment name to match the existing
@@ -13,62 +15,9 @@
 //   /api/21/episodes?page=2&perPage=10
 //
 // Query parameters:
-//   idType=anilist|mal   force how the numeric id is interpreted (disambiguates
-//                        the rare case where the number exists in both databases)
+//   idType=anilist|mal   force how the numeric id is interpreted
 //   page / perPage       episodes pagination (perPage defaults to 50, max 50)
 //   refresh=true|1       bypass the 4-hour cache and refetch from AniList
-//
-// Responses are cached server-side for 4 hours (auto-expiring) and also carry
-// CDN cache headers (s-maxage=14400).
-const { handleFull, handleEpisodes } = require("../_lib/media");
+const itemRoute = require("../_lib/item-route");
 
-module.exports = async (req, res) => {
-  // CORS preflight
-  if (req.method === "OPTIONS") {
-    res.statusCode = 204;
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.end();
-    return;
-  }
-
-  // HEAD is treated like GET (Node suppresses the body automatically), so
-  // cache headers / CORS are consistent for HEAD probes too.
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    const { jsonResponse } = require("../_lib/anilist");
-    return jsonResponse(res, 405, {
-      ok: false,
-      error: "Method not allowed. Use GET.",
-    });
-  }
-
-  const idRaw = (req.query && req.query.category) || (req.params && req.params.category);
-  const actionRaw = (req.query && req.query.action) || (req.params && req.params.action) || "";
-  const action = String(actionRaw).toLowerCase();
-
-  const id = Number.parseInt(idRaw, 10);
-  if (!Number.isInteger(id) || id <= 0) {
-    const { jsonResponse } = require("../_lib/anilist");
-    return jsonResponse(res, 400, {
-      ok: false,
-      status: 400,
-      error: `Invalid anime id: "${idRaw}".`,
-      hint: "Provide a positive integer — either a MyAnimeList id or an AniList id. Example: /api/11061/full",
-    });
-  }
-
-  if (action === "full") return handleFull(req, res, id);
-  if (action === "episodes") return handleEpisodes(req, res, id);
-
-  const { jsonResponse } = require("../_lib/anilist");
-  return jsonResponse(res, 404, {
-    ok: false,
-    status: 404,
-    error: `Unknown action: "${actionRaw}".`,
-    validActions: ["full", "episodes"],
-    hint:
-      "Try /api/{id}/full for full anime metadata or /api/{id}/episodes for the episode list. " +
-      "Visit /api for the category endpoints.",
-  });
-};
+module.exports = (req, res) => itemRoute(req, res, null);

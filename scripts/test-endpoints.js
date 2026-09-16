@@ -122,6 +122,10 @@ async function main() {
   const itemOk = await testItemEndpoints();
   itemOk ? pass++ : fail++;
 
+  console.log(colors.cyan("\nExplicit id-source routes (/api/mal/... + /api/anilist/...):\n"));
+  const sourceOk = await testSourceRoutes();
+  sourceOk ? pass++ : fail++;
+
   console.log(colors.cyan(`\nResult: ${colors.green(pass + " passed")}, ${fail ? colors.red(fail + " failed") : colors.green("0 failed")}\n`));
   process.exit(fail ? 1 : 0);
 }
@@ -155,11 +159,67 @@ async function testItemEndpoints() {
   step(r.status === 200 && p && p.current_page === 2 && p.items && p.items.per_page === 5, "/api/154587/episodes?page=2&perPage=5", JSON.stringify(p || {}));
   const eps = (r.json && r.json.data) || [];
   step(eps.length === 5 && eps[0].mal_id === 6 && eps[4].mal_id === 10, "episodes 6-10 on page 2", eps.map((e) => e.mal_id).join(","));
-  step(eps[0] && "aired" in eps[0] && "score" in eps[0] && "duration" in eps[0], "episode fields present");
+  step(eps[0] && "aired" in eps[0] && "duration" in eps[0], "episode fields present");
+  step(eps[0] && !("score" in eps[0]) && !("themes" in eps[0]), "episode objects omit score + OP/ED themes (AniList does not provide them)");
 
   // 4. 404 path
   r = await callEndpoint("/api/99999999/full");
   step(r.status === 404 && r.json.ok === false, "/api/99999999/full -> 404");
+
+  // 5. /full field contract (romaji Default, images position, isAdult, no licensor)
+  r = await callEndpoint("/api/52991/full");
+  const fd = r.json && r.json.data;
+  step(fd && fd.title === fd.title_romaji, "data.title === data.title_romaji (romaji Default)", fd && `${fd.title} / ${fd.title_romaji}`);
+  step(fd && Array.isArray(fd.titles) && fd.titles[0] && fd.titles[0].type === "Default" && fd.titles[0].title === fd.title_romaji, "titles[0] Default = romaji", fd && JSON.stringify((fd.titles || [])[0]));
+  step(fd && fd.images && fd.images.jpg && fd.images.jpg.image_url && fd.images.webp && fd.images.banner, "images.jpg/webp/banner present", fd && fd.images && fd.images.jpg && fd.images.jpg.image_url);
+  step(fd && typeof fd.isAdult === "boolean", "isAdult flag present", fd && String(fd.isAdult));
+  step(fd && !("licensors" in fd), "no licensor field (AniList has none)");
+
+  return allOk;
+}
+
+// Tests the explicit id-source routes (/api/mal/... + /api/anilist/...). Returns true if everything passed.
+async function testSourceRoutes() {
+  let allOk = true;
+  const step = (ok, label, detail = "") => {
+    if (!ok) allOk = false;
+    console.log((ok ? colors.green("OK  ") : colors.red("FAIL")) + " " + label + colors.dim(detail ? `  ${detail}` : ""));
+  };
+
+  // 1. /api/mal/{id}/full resolves the MAL interpretation directly
+  let r = await callEndpoint("/api/mal/52991/full");
+  step(r.status === 200 && r.json.ok && /Frieren/.test(r.json.data.title), "/api/mal/52991/full -> Frieren", JSON.stringify(r.json.detected || {}).slice(0, 140));
+  step(r.json && r.json.detected && r.json.detected.idType === "mal" && /url path/.test(r.json.detected.forcedBy || ""), "detected: idType=mal forced by url path");
+  step(r.json && r.json.endpoint === "/api/mal/{id}/full", "endpoint label /api/mal/{id}/full", r.json && r.json.endpoint);
+
+  // 2. /api/anilist/{id}/full resolves the AniList interpretation directly
+  r = await callEndpoint("/api/anilist/154587/full");
+  step(r.status === 200 && r.json.ok && r.json.data.anilist_id === 154587 && /Frieren/.test(r.json.data.title), "/api/anilist/154587/full -> Frieren (AniList id)");
+
+  // 3. Genuine ambiguous id 21405: explicit routes MUST return different shows
+  //    (AniList 21405 = Ushinawareta Future Convergence; MAL 21405 = Bokura wa Minna Kawaisou, AniList 20529)
+  r = await callEndpoint("/api/anilist/21405/full");
+  step(r.status === 200 && r.json.data.anilist_id === 21405, "/api/anilist/21405/full -> AniList 21405", r.json && `${r.json.data && r.json.data.title_romaji}`);
+  const anilistTitle = r.json && r.json.data && r.json.data.title_romaji;
+  r = await callEndpoint("/api/mal/21405/full");
+  step(r.status === 200 && r.json.data.mal_id === 21405 && r.json.data.title_romaji !== anilistTitle, "/api/mal/21405/full -> the OTHER show (no ambiguity)", r.json && `${r.json.data && r.json.data.title_romaji}`);
+
+  // 4. episodes on source routes: pagination identical to the generic route
+  r = await callEndpoint("/api/mal/154587/episodes", "page=2&perPage=5");
+  const p = r.json && r.json.pagination;
+  step(r.status === 200 && p && p.current_page === 2 && p.items.per_page === 5, "/api/mal/154587/episodes?page=2&perPage=5", JSON.stringify(p || {}));
+  r = await callEndpoint("/api/anilist/11061/episodes", "perPage=3");
+  step(r.status === 200 && r.json.data.length === 3 && !("score" in r.json.data[0]), "/api/anilist/11061/episodes?perPage=3 -> 3 episodes, no score field");
+
+  // 5. 404s are source-aware
+  r = await callEndpoint("/api/mal/99999999/full");
+  step(r.status === 404 && r.json.ok === false, "/api/mal/99999999/full -> 404", r.json && (r.json.error || "").slice(0, 80));
+  r = await callEndpoint("/api/anilist/99999999/episodes");
+  step(r.status === 404 && r.json.ok === false, "/api/anilist/99999999/episodes -> 404");
+
+  // 6. friendly error when the id is missing on the source routes
+  r = await callEndpoint("/api/mal/full");
+  step(r.status === 400 && /Missing anime id/.test(r.json.error || ""), "/api/mal/full (missing id) -> 400 with hint");
 
   return allOk;
 }

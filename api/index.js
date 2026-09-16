@@ -20,9 +20,29 @@ const CATEGORIES = [
 
 const ITEM_ENDPOINTS = [
   {
+    path: "/api/mal/{mal_id}/full",
+    description: "Full Jikan-style metadata; the id is explicitly a MyAnimeList id. Recommended — deterministic, no ambiguity between overlapping id ranges.",
+    id: "A MyAnimeList id.",
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/mal/52991/full",
+      "/api/mal/11061/full",
+    ],
+  },
+  {
+    path: "/api/anilist/{anilist_id}/full",
+    description: "Full Jikan-style metadata; the id is explicitly an AniList id. Recommended — deterministic, no ambiguity between overlapping id ranges.",
+    id: "An AniList id.",
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/anilist/154587/full",
+      "/api/anilist/11061/full",
+    ],
+  },
+  {
     path: "/api/{id}/full",
-    description: "Full Jikan (MyAnimeList API v4) style metadata for one anime, fetched from AniList.",
-    id: "A MyAnimeList id OR an AniList id (auto-detected). Force with ?idType=anilist|mal.",
+    description: "Backward-compatible generic route: full Jikan-style metadata for one anime, id source auto-detected (MAL id or AniList id).",
+    id: "A MyAnimeList id OR an AniList id (auto-detected). Force with ?idType=anilist|mal, or prefer the explicit /api/mal/... and /api/anilist/... routes.",
     cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
     exampleUsage: [
       "/api/11061/full",
@@ -31,9 +51,39 @@ const ITEM_ENDPOINTS = [
     ],
   },
   {
+    path: "/api/mal/{mal_id}/episodes",
+    description: "Jikan-style episode list; the id is explicitly a MyAnimeList id.",
+    id: "A MyAnimeList id.",
+    queryParameters: [
+      { name: "page",    type: "Int", default: 1,  description: "Page number (1-indexed)." },
+      { name: "perPage", type: "Int", default: 50, description: "Episodes per page (1-50; 50 is AniList's maximum supported page size)." },
+      { name: "refresh", type: "Bool", default: false, description: "true/1 bypasses the 4h cache and refetches from AniList." },
+    ],
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/mal/11061/episodes",
+      "/api/mal/21/episodes?page=2&perPage=10",
+    ],
+  },
+  {
+    path: "/api/anilist/{anilist_id}/episodes",
+    description: "Jikan-style episode list; the id is explicitly an AniList id.",
+    id: "An AniList id.",
+    queryParameters: [
+      { name: "page",    type: "Int", default: 1,  description: "Page number (1-indexed)." },
+      { name: "perPage", type: "Int", default: 50, description: "Episodes per page (1-50; 50 is AniList's maximum supported page size)." },
+      { name: "refresh", type: "Bool", default: false, description: "true/1 bypasses the 4h cache and refetches from AniList." },
+    ],
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/anilist/154587/episodes?perPage=5",
+      "/api/anilist/11061/episodes",
+    ],
+  },
+  {
     path: "/api/{id}/episodes",
-    description: "Jikan-style episode list for one anime (titles, thumbnails, streaming url, aired times).",
-    id: "A MyAnimeList id OR an AniList id (auto-detected). Force with ?idType=anilist|mal.",
+    description: "Backward-compatible generic route: Jikan-style episode list (titles, thumbnails, streaming url, aired times), id source auto-detected.",
+    id: "A MyAnimeList id OR an AniList id (auto-detected). Force with ?idType=anilist|mal, or prefer the explicit /api/mal/... and /api/anilist/... routes.",
     queryParameters: [
       { name: "page",    type: "Int", default: 1,  description: "Page number (1-indexed)." },
       { name: "perPage", type: "Int", default: 50, description: "Episodes per page (1-50; 50 is AniList's maximum supported page size)." },
@@ -81,9 +131,9 @@ module.exports = (req, res) => {
   return jsonResponse(res, 200, {
     ok: true,
     name: "anilist-my-proxy",
-    version: "1.1.0",
+    version: "1.2.0",
     description:
-      "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry. Item endpoints /api/{id}/full and /api/{id}/episodes accept a MAL id OR an AniList id and return Jikan-style data.",
+      "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry. Item endpoints accept a MAL id or an AniList id: explicit-source routes /api/mal/{mal_id}/full|episodes and /api/anilist/{anilist_id}/full|episodes (recommended), or the auto-detecting generic /api/{id}/full and /api/{id}/episodes. All item data is Jikan (MyAnimeList API v4) style.",
     categories: CATEGORIES,
     itemEndpoints: ITEM_ENDPOINTS,
     queryParameters: QUERY_PARAMS,

@@ -1,23 +1,32 @@
 // api/_lib/media.js
-// Item-level endpoints: /api/{id}/full and /api/{id}/episodes
+// Item-level endpoints:
+//   Generic (auto-detect):  /api/{id}/full        /api/{id}/episodes
+//   Explicit id source:     /api/mal/{mal_id}/... /api/anilist/{anilist_id}/...
 //
 // All data is fetched from the AniList GraphQL API and shaped into a
 // Jikan (MyAnimeList API v4) style response.
 //
-// Dual-ID support:
-//   The input id can be a MyAnimeList id OR an AniList id (the numeric ranges
-//   overlap, so auto-detection is needed). Strategy:
-//     1. If ?idType=anilist|mal is forced, look up with that exact semantic.
-//     2. Otherwise try Media(id: N) first.
-//        - Found and its idMal === N -> the number identifies the same show in
-//          both databases ("both").
-//        - Found but idMal !== N -> the number also exists as a MAL id of a
-//          different show ("ambiguous"). We default to the AniList entry and
-//          return a `note` telling the consumer how to get the MAL one
-//          (?idType=mal).
-//        - Not found -> try Media(idMal: N).
-//          - Found -> MAL id.
-//          - Not found -> 404.
+// ID handling:
+//   The numeric ranges of MAL ids and AniList ids overlap. Two ways to address
+//   an entry:
+//
+//   1. Explicit source routes (recommended, deterministic — 1 lookup query):
+//        /api/mal/{id}/...      -> the number is a MyAnimeList id
+//        /api/anilist/{id}/...  -> the number is an AniList id
+//
+//   2. Generic routes with auto-detection:
+//        Strategy:
+//        a. If ?idType=anilist|mal is forced, look up with that exact semantic.
+//        b. Otherwise try Media(id: N) first.
+//           - Found and its idMal === N -> the number identifies the same show
+//             in both databases ("both").
+//           - Found but idMal !== N -> the number also exists as a MAL id of a
+//             different show ("ambiguous"). We default to the AniList entry
+//             and return a `note` telling the consumer how to get the MAL one
+//             (?idType=mal).
+//           - Not found -> try Media(idMal: N).
+//             - Found -> MAL id.
+//             - Not found -> 404.
 //
 // Caching: every response is cached server-side for 4 hours (see _lib/cache.js)
 // and additionally served with CDN headers s-maxage=14400.
@@ -127,7 +136,7 @@ async function fetchGraphQL(query, variables) {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        "User-Agent": "anilist-my-proxy/1.1 (+vercel)",
+        "User-Agent": "anilist-my-proxy/1.2 (+vercel)",
       },
       body: JSON.stringify({ query, variables }),
       signal: controller.signal,
@@ -210,14 +219,22 @@ async function resolveMedia(inputId, idTypeOverride) {
 // Response metadata helpers
 // ---------------------------------------------------------------------------
 
-function buildDetected(inputId, resolved, idTypeOverride) {
+function buildDetected(inputId, resolved, idTypeOverride, source) {
   const detected = {
     inputId,
     idType: resolved.idType,
     anilistId: resolved.anilistId,
     malId: resolved.malId ?? null,
   };
-  if (idTypeOverride) detected.forcedBy = `?idType=${idTypeOverride}`;
+  if (source) {
+    detected.forcedBy = `url path (/api/${source}/{id})`;
+    if (idTypeOverride && idTypeOverride !== source) {
+      detected.ignoredQueryIdType =
+        `?idType=${idTypeOverride} was ignored — the url path already pins the id source to ${source}.`;
+    }
+  } else if (idTypeOverride) {
+    detected.forcedBy = `?idType=${idTypeOverride}`;
+  }
   if (resolved.ambiguous) {
     detected.ambiguous = true;
     detected.note = resolved.note;
@@ -238,14 +255,22 @@ function cacheInfo(key, hit) {
 const SOURCE_LINE = "AniList GraphQL API (https://graphql.anilist.co)";
 
 // ---------------------------------------------------------------------------
-// GET /api/{id}/full
+// GET /api/{id}/full  |  /api/mal/{id}/full  |  /api/anilist/{id}/full
 // ---------------------------------------------------------------------------
+// source: null (auto-detect on the generic route) | "mal" | "anilist"
 
-async function handleFull(req, res, inputId) {
+async function handleFull(req, res, inputId, source) {
   const query = req.query || {};
-  const idTypeOverride = normalizeIdType(query.idType);
+  const qIdType = normalizeIdType(query.idType);
+  const idTypeOverride = source || qIdType;
   const refresh = query.refresh === "true" || query.refresh === "1";
-  const cacheKey = `full:in=${inputId}:t=${idTypeOverride || "auto"}`;
+  const endpointPath = source ? `/api/${source}/{id}/full` : "/api/{id}/full";
+  // On explicit-source routes the url already pins the semantic; qIdType is
+  // only remembered in the key so a conflicting ?idType gets its own cached
+  // copy (with the ignoredQueryIdType note) instead of leaking to the plain url.
+  const cacheKey = source
+    ? `full:src=${source}:in=${inputId}:q=${qIdType || "-"}`
+    : `full:in=${inputId}:t=${idTypeOverride || "auto"}`;
 
   if (!refresh) {
     const cached = cacheGet(cacheKey);
@@ -266,12 +291,18 @@ async function handleFull(req, res, inputId) {
     return jsonResponse(res, 404, {
       ok: false,
       status: 404,
-      endpoint: "/api/{id}/full",
-      error: `Anime not found for id ${inputId}`,
-      hint:
-        `The id was tried both as an AniList id and as a MyAnimeList id, with no match. ` +
-        `Check the id, or force one interpretation with ?idType=anilist / ?idType=mal.`,
-      ...(idTypeOverride ? { forcedIdType: idTypeOverride } : {}),
+      endpoint: endpointPath,
+      error: source
+        ? `No anime found for ${source === "mal" ? "MyAnimeList" : "AniList"} id ${inputId}`
+        : `Anime not found for id ${inputId}`,
+      hint: source === "mal"
+        ? `The id was looked up as a MyAnimeList id. If ${inputId} is an AniList id, use /api/anilist/${inputId}/full instead.`
+        : source === "anilist"
+          ? `The id was looked up as an AniList id. If ${inputId} is a MyAnimeList id, use /api/mal/${inputId}/full instead.`
+          : `The id was tried both as an AniList id and as a MyAnimeList id, with no match. ` +
+            `Check the id, force one interpretation with ?idType=anilist / ?idType=mal, ` +
+            `or use the explicit source routes /api/mal/{id}/full and /api/anilist/{id}/full.`,
+      ...(idTypeOverride && !source ? { forcedIdType: idTypeOverride } : {}),
     }, { cacheControl: CDN_CACHE_CONTROL });
   }
 
@@ -295,7 +326,7 @@ async function handleFull(req, res, inputId) {
     return jsonResponse(res, 404, {
       ok: false,
       status: 404,
-      endpoint: "/api/{id}/full",
+      endpoint: endpointPath,
       error: `Anime not found for id ${inputId}`,
       hint: `The entry disappeared between resolution and fetch — it may have been removed from AniList.`,
     }, { cacheControl: CDN_CACHE_CONTROL });
@@ -303,9 +334,9 @@ async function handleFull(req, res, inputId) {
 
   const body = {
     ok: true,
-    endpoint: "/api/{id}/full",
+    endpoint: endpointPath,
     source: SOURCE_LINE,
-    detected: buildDetected(inputId, resolved, idTypeOverride),
+    detected: buildDetected(inputId, resolved, qIdType, source),
     cache: cacheInfo(cacheKey, false),
     data: buildFullData(media),
     notes: FULL_NOTES,
@@ -317,10 +348,11 @@ async function handleFull(req, res, inputId) {
 
 const FULL_NOTES = [
   "All fields are sourced from AniList and mapped to Jikan (MyAnimeList API v4) naming.",
+  "titles 'Default', flat title and title_romaji carry the AniList romaji title (Jikan's Default is the romaji too). AniList's userPreferred is used only when romaji is absent.",
   "score is AniList averageScore/10; scored_by is the sum of AniList score distribution votes; members is AniList popularity count; favorites is AniList favourites.",
   "rank / popularity are AniList all-time RATED / POPULAR rankings (they differ from MAL's own rankings).",
-  "studios/producers mal_id and url are null because AniList does not expose MAL studio ids; licensors is empty because AniList has no licensor data.",
-  "rating is derived from isAdult/genres/tags; AniList does not provide MAL's official age rating (null when there is no confident signal).",
+  "studios/producers mal_id and url are null because AniList does not expose MAL studio ids. There is no licensors field: AniList has no licensor data at all.",
+  "rating: AniList does not provide MAL's official age rating string — it only exposes the isAdult flag (included in the payload). rating is a best-effort derivation from isAdult/genres/tags and is null when there is no confident signal.",
   "opening_themes/ending_themes are not exposed by the AniList GraphQL API and are returned as null.",
 ];
 
@@ -329,6 +361,8 @@ function buildFullData(media) {
   const genres = media.genres || [];
   const taxonomies = J.buildTaxonomies(genres, tags, media.studios);
   const isAiring = media.status === "RELEASING";
+  const title = media.title || {};
+  const romajiTitle = title.romaji || title.userPreferred || null;
 
   // Broadcast: Jikan only populates it for currently-airing shows. Prefer the
   // upcoming broadcast slot; fall back to the most recent tracked slot.
@@ -363,13 +397,18 @@ function buildFullData(media) {
     id: media.id,
     url: malId ? `https://myanimelist.net/anime/${malId}` : null,
     anilist_url: media.siteUrl || (media.id ? `https://anilist.co/anime/${media.id}` : null),
-    image_url: (media.coverImage && (media.coverImage.large || media.coverImage.extraLarge)) || null,
+    // Jikan places `images` right after `url` — same position here so cover
+    // images are easy to find. `image_url` (below) is kept as a legacy shortcut.
+    images: J.buildImages(media.coverImage, media.bannerImage),
+    image_url: (media.coverImage && (media.coverImage.extraLarge || media.coverImage.large)) || null,
     trailer: J.buildTrailer(media.trailer),
     approved: !media.isAdult,
-    titles: J.buildTitles(media.title || {}, media.synonyms),
-    title: (media.title && media.title.userPreferred) || (media.title && media.title.romaji) || null,
-    title_english: (media.title && media.title.english) || null,
-    title_japanese: (media.title && media.title.native) || null,
+    isAdult: !!media.isAdult,
+    titles: J.buildTitles(title, media.synonyms),
+    title: romajiTitle,
+    title_romaji: title.romaji ?? null,
+    title_english: title.english || null,
+    title_japanese: title.native || null,
     title_synonyms: media.synonyms || [],
     type: J.FORMAT_TO_TYPE[media.format] || null,
     source: J.SOURCE_MAP[media.source] || null,
@@ -396,7 +435,6 @@ function buildFullData(media) {
     averageScore: media.averageScore ?? null,
     meanScore: media.meanScore ?? null,
     producers: taxonomies.producers,
-    licensors: taxonomies.licensors,
     studios: taxonomies.studios,
     genres: taxonomies.genres,
     explicit_genres: taxonomies.explicit_genres,
@@ -406,7 +444,6 @@ function buildFullData(media) {
     ending_themes: null,
     external_links: J.buildExternalLinks(media.externalLinks),
     tags: J.buildTags(tags),
-    images: J.buildImages(media.coverImage, media.bannerImage),
   };
 }
 
@@ -423,13 +460,15 @@ function cleanDescription(desc) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/{id}/episodes
+// GET /api/{id}/episodes  |  /api/mal/{id}/episodes  |  /api/anilist/{id}/episodes
 // ---------------------------------------------------------------------------
 
-async function handleEpisodes(req, res, inputId) {
+async function handleEpisodes(req, res, inputId, source) {
   const query = req.query || {};
-  const idTypeOverride = normalizeIdType(query.idType);
+  const qIdType = normalizeIdType(query.idType);
+  const idTypeOverride = source || qIdType;
   const refresh = query.refresh === "true" || query.refresh === "1";
+  const endpointPath = source ? `/api/${source}/{id}/episodes` : "/api/{id}/episodes";
 
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   let perPage = parseInt(query.perPage, 10);
@@ -441,7 +480,9 @@ async function handleEpisodes(req, res, inputId) {
     perPageNote = `perPage was capped at ${MAX_PER_PAGE} (AniList's maximum supported page size).`;
   }
 
-  const cacheKey = `episodes:in=${inputId}:t=${idTypeOverride || "auto"}:p=${page}:pp=${perPage}`;
+  const cacheKey = source
+    ? `episodes:src=${source}:in=${inputId}:q=${qIdType || "-"}:p=${page}:pp=${perPage}`
+    : `episodes:in=${inputId}:t=${idTypeOverride || "auto"}:p=${page}:pp=${perPage}`;
 
   if (!refresh) {
     const cached = cacheGet(cacheKey);
@@ -462,12 +503,18 @@ async function handleEpisodes(req, res, inputId) {
     return jsonResponse(res, 404, {
       ok: false,
       status: 404,
-      endpoint: "/api/{id}/episodes",
-      error: `Anime not found for id ${inputId}`,
-      hint:
-        `The id was tried both as an AniList id and as a MyAnimeList id, with no match. ` +
-        `Check the id, or force one interpretation with ?idType=anilist / ?idType=mal.`,
-      ...(idTypeOverride ? { forcedIdType: idTypeOverride } : {}),
+      endpoint: endpointPath,
+      error: source
+        ? `No anime found for ${source === "mal" ? "MyAnimeList" : "AniList"} id ${inputId}`
+        : `Anime not found for id ${inputId}`,
+      hint: source === "mal"
+        ? `The id was looked up as a MyAnimeList id. If ${inputId} is an AniList id, use /api/anilist/${inputId}/episodes instead.`
+        : source === "anilist"
+          ? `The id was looked up as an AniList id. If ${inputId} is a MyAnimeList id, use /api/mal/${inputId}/episodes instead.`
+          : `The id was tried both as an AniList id and as a MyAnimeList id, with no match. ` +
+            `Check the id, force one interpretation with ?idType=anilist / ?idType=mal, ` +
+            `or use the explicit source routes /api/mal/{id}/episodes and /api/anilist/{id}/episodes.`,
+      ...(idTypeOverride && !source ? { forcedIdType: idTypeOverride } : {}),
     }, { cacheControl: CDN_CACHE_CONTROL });
   }
 
@@ -515,7 +562,6 @@ async function handleEpisodes(req, res, inputId) {
         title_romanji: null,
         aired: J.unixToIso(airingAt),
         aired_at: airingAt,
-        score: null, // AniList does not expose per-episode user scores
         filler: null, // not available on AniList
         recap: null, // not available on AniList
         duration: media.duration ?? null,
@@ -523,7 +569,8 @@ async function handleEpisodes(req, res, inputId) {
         images: se && se.thumbnail
           ? { jpg: { image_url: se.thumbnail, small_image_url: se.thumbnail, large_image_url: se.thumbnail } }
           : null,
-        themes: { opening: null, ending: null }, // OP/ED timings are not exposed by AniList
+        // NOTE: no per-episode score and no OP/ED theme timings — AniList does
+        // not provide either, so the fields are omitted instead of null-filled.
       });
     }
   }
@@ -531,9 +578,9 @@ async function handleEpisodes(req, res, inputId) {
   const lastVisiblePage = Math.max(1, Math.ceil(total / perPage));
   const body = {
     ok: true,
-    endpoint: "/api/{id}/episodes",
+    endpoint: endpointPath,
     source: SOURCE_LINE,
-    detected: buildDetected(inputId, resolved, idTypeOverride),
+    detected: buildDetected(inputId, resolved, qIdType, source),
     cache: cacheInfo(cacheKey, false),
     pagination: {
       last_visible_page: lastVisiblePage,
@@ -550,7 +597,7 @@ async function handleEpisodes(req, res, inputId) {
       "All data is sourced from AniList and shaped like Jikan's /anime/{id}/episodes response.",
       "Episode titles, thumbnails and streaming urls come from AniList streamingEpisodes when tracked.",
       "aired comes from AniList airing schedules (JST broadcast moments); episodes outside the tracked window have null.",
-      "per-episode score / filler / recap flags and OP/ED theme start-end times are not exposed by the AniList GraphQL API and are returned as null.",
+      "Per-episode user scores and OP/ED theme start-end times are omitted entirely — AniList does not provide them. filler/recap flags are not exposed either and stay null.",
       "perPage defaults to 50 (AniList's maximum supported page size) and is capped at 50.",
       ...(perPageNote ? [perPageNote] : []),
       ...(total === 0

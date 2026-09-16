@@ -22,17 +22,37 @@ Every endpoint returns paginated anime data with **both the AniList `id` and the
 | `/api/popular` | — | POPULARITY_DESC | All-time most popular |
 | `/api` | — | — | Self-documenting landing page listing all categories & params |
 
-## Item endpoints (single anime — MAL id OR AniList id)
+## Item endpoints (single anime)
 
-These accept **either a MyAnimeList id or an AniList id** (auto-detected, since
-the numeric ranges overlap) and return data shaped like the
-[Jikan](https://jikan.moe) (MyAnimeList API v4) response format. All data is
-sourced from AniList.
+Item endpoints come in two flavors. **Explicit id-source routes are recommended**
+— the URL itself says which database the id belongs to, so lookups are a single
+deterministic AniList query with no ambiguity (MAL and AniList id ranges
+overlap). The older generic routes auto-detect the id source and remain
+available for backward compatibility. All data is shaped like the
+[Jikan](https://jikan.moe) (MyAnimeList API v4) response format and sourced
+from AniList.
 
 | Path | Description |
 |---|---|
-| `/api/{id}/full` | Full anime metadata: titles, images (incl. banner), trailer, mal_id/anilist_id, type, source, episodes, status, airing, aired (prop + string), duration, rating, score, scored_by, rank, popularity, members, favorites, description/synopsis, broadcast (JST), season/year/season_string, nextAiringEpisode, countryOfOrigin, averageScore/meanScore, producers/licensors/studios/genres/explicit_genres/demographics/themes, external_links, tags, title_synonyms |
-| `/api/{id}/episodes` | Episode list with titles, thumbnails, streaming url, aired timestamps, duration. Pagination info at the top (`last_visible_page`, `has_next_page`, `current_page`, `items.{count,total,per_page}`) |
+| `/api/mal/{mal_id}/full` | Full anime metadata; the id is always treated as a **MyAnimeList** id |
+| `/api/anilist/{anilist_id}/full` | Full anime metadata; the id is always treated as an **AniList** id |
+| `/api/{id}/full` | Backward-compatible generic route — id source auto-detected (`?idType=anilist\|mal` to force) |
+| `/api/mal/{mal_id}/episodes` | Episode list; the id is always treated as a **MyAnimeList** id |
+| `/api/anilist/{anilist_id}/episodes` | Episode list; the id is always treated as an **AniList** id |
+| `/api/{id}/episodes` | Backward-compatible generic route — id source auto-detected |
+
+`/full` payload: titles (romaji as Default + explicit `title_romaji`), images
+right after `url` (jpg/webp cover formats incl. extraLarge + banner), trailer,
+mal_id/anilist_id, url/anilist_url, type, source, episodes, status, airing,
+aired (prop + string), duration, rating + isAdult, score, scored_by, rank,
+popularity, members, favorites, description/synopsis, broadcast (JST),
+season/year/season_string, nextAiringEpisode, countryOfOrigin,
+averageScore/meanScore, producers/studios/genres/explicit_genres/demographics/themes,
+external_links, tags, title_synonyms.
+
+`/episodes` payload: pagination info at the top (`last_visible_page`,
+`has_next_page`, `current_page`, `items.{count,total,per_page}`) followed by
+episodes with titles, thumbnails, streaming url, aired timestamps and duration.
 
 Item endpoint query parameters:
 
@@ -40,10 +60,10 @@ Item endpoint query parameters:
 |---|---|---|
 | `page` | 1 | Episodes page (1-indexed) |
 | `perPage` | 50 | Episodes per page — 50 is AniList's maximum supported page size (values above are capped) |
-| `idType` | auto | `anilist` or `mal` — force how the numeric id is interpreted |
+| `idType` | auto | generic routes only: `anilist` or `mal` — force how the numeric id is interpreted |
 | `refresh` | false | `true`/`1` bypasses the cache and refetches from AniList |
 
-### ID auto-detection
+### ID auto-detection (generic routes only)
 
 1. The id is first tried as an AniList id. If the entry's own `idMal` equals
    the number, the id identifies the same show in both databases.
@@ -52,22 +72,31 @@ Item endpoint query parameters:
    `detected.ambiguous: true` with a `note` describing both matches; the
    AniList interpretation is used by default and `?idType=mal` selects the other.
 
+The explicit-source routes never have this problem: `/api/mal/21405/...` and
+`/api/anilist/21405/...` each return exactly one well-defined show.
+
 ### Caching
 
-Both item endpoints cache responses **server-side for 4 hours** (auto-expiry —
+All item endpoints cache responses **server-side for 4 hours** (auto-expiry —
 once expired, the next visit fetches fresh data from AniList) and are also
 served with CDN headers (`s-maxage=14400, stale-while-revalidate=14400`). Use
 `?refresh=1` to force a fresh fetch. Every response reports its cache state in
-the `cache` object.
+the `cache` object. Cache keys are isolated per route, so `/api/mal/52991/full`
+and `/api/anilist/154587/full` resolve independently.
 
-### AniList data limitations (returned as `null`)
+### AniList data limitations
 
-AniList's GraphQL API does not expose: MAL's official age-rating string
-(`rating` is derived from genres/tags instead), studio MAL ids
-(`studios`/`producers` have `mal_id: null`), licensors, opening/ending themes,
-per-episode user scores, per-episode OP/ED timings, or filler/recap flags.
-These fields are present in the response shape but `null`/empty, and each
-response carries `notes` documenting this.
+AniList's GraphQL API does not expose: MAL's official age-rating string (only
+the `isAdult` flag — `rating` is a best-effort derivation from genres/tags and
+is `null` when there is no confident signal), studio MAL ids
+(`studios`/`producers` have `mal_id: null`), opening/ending themes, per-episode
+user scores, or per-episode OP/ED timings.
+
+Fields with **no AniList source at all are omitted entirely** rather than
+null-filled: there is no `licensors` field in `/full`, and episode objects in
+`/episodes` have no `score` or OP/ED timing fields. Filler/recap flags stay
+`null` for Jikan-shape compatibility. Each response carries `notes`
+documenting this.
 
 ## Query parameters (supported by every category endpoint)
 
