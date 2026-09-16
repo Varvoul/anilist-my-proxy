@@ -2,6 +2,11 @@
 // Item-level endpoints for a single anime, addressed by either a MyAnimeList
 // id or an AniList id (auto-detected — see api/_lib/media.js).
 //
+// Routing note: this lives at api/[category]/[action].js because Vercel
+// requires the first dynamic segment name to match the existing
+// api/[category].js route ([id] would conflict with [category]).
+// Vercel injects the segments as req.query.category + req.query.action.
+//
 //   /api/11061/full          -> full Jikan-style metadata (HxH 2011; valid as both id types)
 //   /api/52991/full          -> MAL id lookup (Sousou no Frieren)
 //   /api/11061/episodes      -> episode list, 50 per page (AniList max) by default
@@ -36,7 +41,7 @@ module.exports = async (req, res) => {
     });
   }
 
-  const idRaw = (req.query && req.query.id) || (req.params && req.params.id);
+  const idRaw = (req.query && req.query.category) || (req.params && req.params.category);
   const actionRaw = (req.query && req.query.action) || (req.params && req.params.action) || "";
   const action = String(actionRaw).toLowerCase();
 
