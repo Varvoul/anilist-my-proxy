@@ -33,7 +33,9 @@ module.exports = async (req, res) => {
     return;
   }
 
-  if (req.method !== "GET") {
+  // HEAD is treated like GET (Node suppresses the body automatically), so
+  // cache headers / CORS are consistent for HEAD probes too.
+  if (req.method !== "GET" && req.method !== "HEAD") {
     const { jsonResponse } = require("../_lib/anilist");
     return jsonResponse(res, 405, {
       ok: false,
