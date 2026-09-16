@@ -51,6 +51,36 @@ const ITEM_ENDPOINTS = [
     ],
   },
   {
+    path: "/api/mal/{mal_id}/relations",
+    description: "All related entries for the anime (prequel, sequel, side story, spin-off, source manga, etc. — everything AniList returns), each with both ids, cover + banner images and AniList-style titles; the id is explicitly a MyAnimeList id.",
+    id: "A MyAnimeList id.",
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/mal/16498/relations",
+      "/api/mal/52991/relations",
+    ],
+  },
+  {
+    path: "/api/anilist/{anilist_id}/relations",
+    description: "All related entries for the anime (prequel, sequel, side story, spin-off, source manga, etc. — everything AniList returns), each with both ids, cover + banner images and AniList-style titles; the id is explicitly an AniList id.",
+    id: "An AniList id.",
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/anilist/16498/relations",
+      "/api/anilist/154587/relations",
+    ],
+  },
+  {
+    path: "/api/{id}/relations",
+    description: "Backward-compatible generic route: all related entries (AniList relations incl. prequel/sequel seasons), id source auto-detected. The same relation entries are also embedded in /full as data.relations + data.seasons.",
+    id: "A MyAnimeList id OR an AniList id (auto-detected). Force with ?idType=anilist|mal, or prefer the explicit /api/mal/... and /api/anilist/... routes.",
+    cache: "Server-side cache with 4h TTL (auto-expires; next visit refetches from AniList) + CDN s-maxage=14400.",
+    exampleUsage: [
+      "/api/16498/relations",
+      "/api/154587/relations",
+    ],
+  },
+  {
     path: "/api/mal/{mal_id}/episodes",
     description: "Jikan-style episode list; the id is explicitly a MyAnimeList id.",
     id: "A MyAnimeList id.",
@@ -131,9 +161,9 @@ module.exports = (req, res) => {
   return jsonResponse(res, 200, {
     ok: true,
     name: "anilist-my-proxy",
-    version: "1.2.0",
+    version: "1.3.0",
     description:
-      "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry. Item endpoints accept a MAL id or an AniList id: explicit-source routes /api/mal/{mal_id}/full|episodes and /api/anilist/{anilist_id}/full|episodes (recommended), or the auto-detecting generic /api/{id}/full and /api/{id}/episodes. All item data is Jikan (MyAnimeList API v4) style.",
+      "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry. Item endpoints accept a MAL id or an AniList id: explicit-source routes /api/mal/{mal_id}/full|episodes|relations and /api/anilist/{anilist_id}/full|episodes|relations (recommended), or the auto-detecting generic /api/{id}/full, /api/{id}/episodes and /api/{id}/relations. All item data is Jikan (MyAnimeList API v4) style; relations are AniList style.",
     categories: CATEGORIES,
     itemEndpoints: ITEM_ENDPOINTS,
     queryParameters: QUERY_PARAMS,

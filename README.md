@@ -37,6 +37,9 @@ from AniList.
 | `/api/mal/{mal_id}/full` | Full anime metadata; the id is always treated as a **MyAnimeList** id |
 | `/api/anilist/{anilist_id}/full` | Full anime metadata; the id is always treated as an **AniList** id |
 | `/api/{id}/full` | Backward-compatible generic route — id source auto-detected (`?idType=anilist\|mal` to force) |
+| `/api/mal/{mal_id}/relations` | **All related entries** (prequel/sequel seasons, side stories, spin-offs, source manga…); id is a **MyAnimeList** id |
+| `/api/anilist/{anilist_id}/relations` | All related entries; id is an **AniList** id |
+| `/api/{id}/relations` | Backward-compatible generic route — id source auto-detected |
 | `/api/mal/{mal_id}/episodes` | Episode list; the id is always treated as a **MyAnimeList** id |
 | `/api/anilist/{anilist_id}/episodes` | Episode list; the id is always treated as an **AniList** id |
 | `/api/{id}/episodes` | Backward-compatible generic route — id source auto-detected |
@@ -48,7 +51,57 @@ aired (prop + string), duration, rating + isAdult, score, scored_by, rank,
 popularity, members, favorites, description/synopsis, broadcast (JST),
 season/year/season_string, nextAiringEpisode, countryOfOrigin,
 averageScore/meanScore, producers/studios/genres/explicit_genres/demographics/themes,
-external_links, tags, title_synonyms.
+**relations + seasons**, external_links, tags, title_synonyms.
+
+### Relations (prequel / sequel / all related entries)
+
+`/full` embeds two extra blocks, and a standalone `/api/{source}/{id}/relations`
+endpoint returns the same list without the heavy metadata:
+
+- **`relations`** — *every* relation AniList returns, one flat entry per AniList
+  relation edge (raw `relation_type` enums from AniList's relationType v2:
+  `PREQUEL`, `SEQUEL`, `SIDE_STORY`, `SPIN_OFF`, `SOURCE`, `ADAPTATION`,
+  `SUMMARY`, `CHARACTER`, `ALTERNATIVE`, `PARENT`, `OTHER` — plus a friendly
+  `relation` label).
+- **`seasons`** — convenience split of the prequel/sequel chain, sorted
+  chronologically (`seasons.prequels[]`, `seasons.sequels[]`), so season
+  ordering is available without re-sorting by the consumer.
+
+Every relation entry is self-contained and AniList style:
+
+```jsonc
+{
+  "relation_type": "SEQUEL",          // raw AniList enum (relationType v2)
+  "relation": "Sequel",               // friendly label
+  "mal_id": 59978,                    // MyAnimeList id of the related entry (null when not on MAL)
+  "anilist_id": 182255,               // AniList id of the related entry
+  "id": 182255,
+  "type": "anime",                    // "anime" or "manga" (manga = e.g. the SOURCE manga)
+  "media_type": "ANIME",              // raw AniList type enum
+  "format": "TV",
+  "url": "https://myanimelist.net/anime/59978",   // null when mal_id is null
+  "anilist_url": "https://anilist.co/anime/182255",
+  "title": "Sousou no Frieren 2nd Season",        // romaji default, same as /full
+  "titles": { "romaji": "…", "english": "…", "native": "…", "userPreferred": "…" },
+  "title_english": "…", "title_japanese": "…", "title_synonyms": ["…"],
+  "images": { "jpg": {…}, "webp": {…}, "banner": { "large": …, "small": … } },
+  "image_url": "https://s4.anilist.co/…",        // extraLarge cover
+  "banner_image": "https://s4.anilist.co/…",
+  "cover_color": "#7ca3c6",
+  "status": "Finished Airing",         // Jikan wording for anime; manga uses its own status
+  "episodes": 24,                      // anime only; manga entries carry chapters/volumes instead
+  "duration": "24 min per ep",
+  "season": "winter", "year": 2026,
+  "score": 8.6, "averageScore": 86,
+  "popularity": 118000, "favorites": 5400,
+  "genres": ["Adventure", "Drama", "Fantasy"],
+  "isAdult": false
+}
+```
+
+Example: `/api/anilist/154587/relations` (Sousou no Frieren) returns its source
+manga, the ●● no Mahou side stories, the 2nd-season sequel and more — whatever
+AniList tracks for that entry, including entries whose `mal_id` is `null`.
 
 `/episodes` payload: pagination info at the top (`last_visible_page`,
 `has_next_page`, `current_page`, `items.{count,total,per_page}`) followed by

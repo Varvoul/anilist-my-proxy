@@ -1,4 +1,4 @@
-// GET /api/{id}/full  and  GET /api/{id}/episodes
+// GET /api/{id}/full, /api/{id}/episodes  and  /api/{id}/relations
 // Generic item-level routes: the numeric id is auto-detected as a MyAnimeList
 // id or an AniList id (see api/_lib/media.js). Explicit-source alternatives:
 // /api/mal/{mal_id}/... and /api/anilist/{anilist_id}/... (recommended —
@@ -11,7 +11,7 @@
 //
 //   /api/11061/full          -> full Jikan-style metadata (HxH 2011; valid as both id types)
 //   /api/52991/full          -> MAL id lookup (Sousou no Frieren)
-//   /api/11061/episodes      -> episode list, 50 per page (AniList max) by default
+//   /api/11061/relations     -> all related entries (prequel/sequel/...), AniList style
 //   /api/21/episodes?page=2&perPage=10
 //
 // Query parameters:

@@ -87,6 +87,73 @@ query ($id: Int, $idMal: Int) {
     stats { scoreDistribution { score amount } }
     siteUrl
     airingSchedule(page: 1, perPage: 1) { nodes { episode airingAt } }
+    relations {
+      edges {
+        relationType(version: 2)
+        node {
+          id
+          idMal
+          type
+          format
+          status
+          episodes
+          chapters
+          volumes
+          duration
+          season
+          seasonYear
+          averageScore
+          popularity
+          favourites
+          genres
+          isAdult
+          siteUrl
+          title { romaji english native userPreferred }
+          synonyms
+          coverImage { extraLarge large medium color }
+          bannerImage
+        }
+      }
+    }
+  }
+}
+`;
+
+// Relations-only fetch for the standalone /relations action (lighter than FULL).
+const RELATIONS_QUERY = `
+query ($id: Int, $idMal: Int) {
+  Media(id: $id, idMal: $idMal, type: ANIME) {
+    id
+    idMal
+    title { romaji userPreferred }
+    relations {
+      edges {
+        relationType(version: 2)
+        node {
+          id
+          idMal
+          type
+          format
+          status
+          episodes
+          chapters
+          volumes
+          duration
+          season
+          seasonYear
+          averageScore
+          popularity
+          favourites
+          genres
+          isAdult
+          siteUrl
+          title { romaji english native userPreferred }
+          synonyms
+          coverImage { extraLarge large medium color }
+          bannerImage
+        }
+      }
+    }
   }
 }
 `;
@@ -354,7 +421,134 @@ const FULL_NOTES = [
   "studios/producers mal_id and url are null because AniList does not expose MAL studio ids. There is no licensors field: AniList has no licensor data at all.",
   "rating: AniList does not provide MAL's official age rating string — it only exposes the isAdult flag (included in the payload). rating is a best-effort derivation from isAdult/genres/tags and is null when there is no confident signal.",
   "opening_themes/ending_themes are not exposed by the AniList GraphQL API and are returned as null.",
+  "relations: every relation AniList returns (prequel, sequel, side story, spin-off, source manga, adaptation, summary, character, alternative, other — AniList relationType version 2 enums). Each entry carries both mal_id and anilist_id, cover + banner images and AniList-style titles. seasons is a convenience split of relations into chronological prequels/sequels.",
 ];
+
+// ---------------------------------------------------------------------------
+// Relations (AniList edges)
+// ---------------------------------------------------------------------------
+// AniList relationType (version 2) enums -> friendly labels. Every relation
+// AniList returns is included; the enum is kept raw in relation_type.
+const RELATION_FRIENDLY = {
+  ADAPTATION: "Adaptation",
+  PREQUEL: "Prequel",
+  SEQUEL: "Sequel",
+  PARENT: "Parent story",
+  SIDE_STORY: "Side story",
+  SPIN_OFF: "Spin-off",
+  ALTERNATIVE: "Alternative",
+  ALTERNATIVE_VERSION: "Alternative version",
+  ALTERNATIVE_SETTING: "Alternative setting",
+  CHARACTER: "Character",
+  SUMMARY: "Summary",
+  SOURCE: "Source",
+  OTHER: "Other",
+  CONTAINS: "Contains",
+};
+
+// Manga nodes are MANGA-typed relation nodes; AniList wording for their status.
+const MANGA_STATUS_MAP = {
+  FINISHED: "Finished",
+  RELEASING: "Releasing",
+  NOT_YET_RELEASED: "Not Yet Released",
+  CANCELLED: "Cancelled",
+  HIATUS: "Hiatus",
+};
+
+const SEASON_ORDER = { WINTER: 1, SPRING: 2, SUMMER: 3, FALL: 4 };
+
+// One flat, self-contained entry per AniList relation edge. Shaped AniList
+// style (raw relation_type enum, titles {romaji, english, native,
+// userPreferred}, coverImage urls) while keeping the proxy's aliases
+// (mal_id/anilist_id, images.jpg/webp/banner).
+function buildRelationEntry(edge) {
+  const n = edge && edge.node;
+  if (!n) return null;
+  const isAnime = (n.type || "ANIME") === "ANIME";
+  const relType = edge.relationType || null;
+  const title = n.title || {};
+  const romajiTitle = title.romaji || title.userPreferred || null;
+  const cover = n.coverImage || {};
+  const coverUrl = cover.extraLarge || cover.large || null;
+  const score = n.averageScore != null ? Math.round((n.averageScore / 10) * 100) / 100 : null;
+
+  return {
+    // Relation info — raw AniList enum + friendly label
+    relation_type: relType,
+    relation: relType ? (RELATION_FRIENDLY[relType] || relType.replace(/_/g, " ")) : null,
+    // Both database ids
+    mal_id: n.idMal ?? null,
+    anilist_id: n.id,
+    id: n.id,
+    // Entry type: "anime" | "manga" (+ raw AniList enum)
+    type: isAnime ? "anime" : "manga",
+    media_type: n.type || null,
+    format: n.format || null,
+    // Links (MAL url only when a MAL id exists)
+    url: n.idMal ? `https://myanimelist.net/${isAnime ? "anime" : "manga"}/${n.idMal}` : null,
+    anilist_url: n.siteUrl || (n.id ? `https://anilist.co/${isAnime ? "anime" : "manga"}/${n.id}` : null),
+    // AniList-style titles + flat aliases (romaji default, same as /full)
+    title: romajiTitle,
+    titles: {
+      romaji: title.romaji ?? null,
+      english: title.english ?? null,
+      native: title.native ?? null,
+      userPreferred: title.userPreferred ?? null,
+    },
+    title_english: title.english || null,
+    title_japanese: title.native || null,
+    title_synonyms: n.synonyms || [],
+    // Cover + banner images (jpg/webp formats + banner block)
+    images: J.buildImages(cover, n.bannerImage),
+    image_url: coverUrl,
+    banner_image: n.bannerImage || null,
+    cover_color: cover.color || null,
+    // Key facts
+    status: isAnime ? (J.STATUS_MAP[n.status] || null) : (MANGA_STATUS_MAP[n.status] || null),
+    episodes: isAnime ? (n.episodes ?? null) : null,
+    chapters: isAnime ? null : (n.chapters ?? null),
+    volumes: isAnime ? null : (n.volumes ?? null),
+    duration: isAnime ? J.buildDuration(n.duration, n.format) : null,
+    season: n.season ? n.season.toLowerCase() : null,
+    year: n.seasonYear ?? null,
+    score,
+    averageScore: n.averageScore ?? null,
+    popularity: n.popularity ?? null,
+    favorites: n.favourites ?? null,
+    genres: n.genres || [],
+    isAdult: !!n.isAdult,
+  };
+}
+
+function buildRelations(relations) {
+  const edges = (relations && relations.edges) || [];
+  const out = [];
+  const seen = new Set();
+  for (const edge of edges) {
+    const entry = buildRelationEntry(edge);
+    if (!entry) continue;
+    const key = `${entry.relation_type}:${entry.media_type}:${entry.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
+}
+
+// Convenience split of the relations into the prequel/sequel chain, sorted
+// chronologically (year, then season). Movies/OVAs that AniList marks as
+// PREQUEL/SEQUEL are included — faithful to what AniList returns.
+function buildSeasons(relations) {
+  const chain = relations.filter((r) => r.relation_type === "PREQUEL" || r.relation_type === "SEQUEL");
+  const byChron = (a, b) =>
+    (a.year ?? 9999) - (b.year ?? 9999) ||
+    (SEASON_ORDER[String(a.season || "").toUpperCase()] ?? 9) - (SEASON_ORDER[String(b.season || "").toUpperCase()] ?? 9) ||
+    (a.anilist_id ?? 0) - (b.anilist_id ?? 0);
+  return {
+    prequels: chain.filter((r) => r.relation_type === "PREQUEL").sort(byChron),
+    sequels: chain.filter((r) => r.relation_type === "SEQUEL").sort(byChron),
+  };
+}
 
 function buildFullData(media) {
   const tags = media.tags || [];
@@ -390,6 +584,7 @@ function buildFullData(media) {
   const score = media.averageScore != null ? Math.round((media.averageScore / 10) * 100) / 100 : null;
   const description = cleanDescription(media.description);
   const malId = media.idMal ?? null;
+  const relations = buildRelations(media.relations);
 
   return {
     mal_id: malId,
@@ -440,6 +635,8 @@ function buildFullData(media) {
     explicit_genres: taxonomies.explicit_genres,
     demographics: taxonomies.demographics,
     themes: taxonomies.themes,
+    relations,
+    seasons: buildSeasons(relations),
     opening_themes: null,
     ending_themes: null,
     external_links: J.buildExternalLinks(media.externalLinks),
@@ -664,4 +861,104 @@ function anilistError(res, err, inputId) {
   }, { cacheControl: CDN_CACHE_CONTROL });
 }
 
-module.exports = { handleFull, handleEpisodes };
+// ---------------------------------------------------------------------------
+// GET /api/{id}/relations  |  /api/mal/{id}/relations  |  /api/anilist/{id}/relations
+// ---------------------------------------------------------------------------
+// Standalone relations endpoint — same entries as data.relations in /full,
+// without the heavy metadata payload.
+
+const RELATIONS_NOTES = [
+  "Every relation AniList returns for the anime (relationType version 2 enums): prequel, sequel, side story, spin-off, source, adaptation, summary, character, alternative, parent, other.",
+  "Entries with relation_type PREQUEL / SEQUEL form the season chain — also mirrored chronologically in the top-level seasons object.",
+  "Each entry carries both ids (mal_id can be null when the related entry is not tracked on MyAnimeList), cover + banner images and AniList-style titles (romaji default).",
+  "Manga relations (e.g. the source manga) are included with type=\"manga\" and expose chapters/volumes instead of episodes.",
+];
+
+async function handleRelations(req, res, inputId, source) {
+  const query = req.query || {};
+  const qIdType = normalizeIdType(query.idType);
+  const idTypeOverride = source || qIdType;
+  const refresh = query.refresh === "true" || query.refresh === "1";
+  const endpointPath = source ? `/api/${source}/{id}/relations` : "/api/{id}/relations";
+  const cacheKey = source
+    ? `relations:src=${source}:in=${inputId}:q=${qIdType || "-"}`
+    : `relations:in=${inputId}:t=${idTypeOverride || "auto"}`;
+
+  if (!refresh) {
+    const cached = cacheGet(cacheKey);
+    if (cached) {
+      cached.cache = cacheInfo(cacheKey, true);
+      return jsonResponse(res, 200, cached, { cacheControl: CDN_CACHE_CONTROL });
+    }
+  }
+
+  let resolved;
+  try {
+    resolved = await resolveMedia(inputId, idTypeOverride);
+  } catch (err) {
+    return anilistError(res, err, inputId);
+  }
+
+  if (!resolved) {
+    return jsonResponse(res, 404, {
+      ok: false,
+      status: 404,
+      endpoint: endpointPath,
+      error: source
+        ? `No anime found for ${source === "mal" ? "MyAnimeList" : "AniList"} id ${inputId}`
+        : `Anime not found for id ${inputId}`,
+      hint: source === "mal"
+        ? `The id was looked up as a MyAnimeList id. If ${inputId} is an AniList id, use /api/anilist/${inputId}/relations instead.`
+        : source === "anilist"
+          ? `The id was looked up as an AniList id. If ${inputId} is a MyAnimeList id, use /api/mal/${inputId}/relations instead.`
+          : `The id was tried both as an AniList id and as a MyAnimeList id, with no match. ` +
+            `Use the explicit source routes /api/mal/{id}/relations and /api/anilist/{id}/relations.`,
+      ...(idTypeOverride && !source ? { forcedIdType: idTypeOverride } : {}),
+    }, { cacheControl: CDN_CACHE_CONTROL });
+  }
+
+  let media;
+  try {
+    const variables = {};
+    if (idTypeOverride === "mal") { variables.idMal = inputId; }
+    else if (idTypeOverride === "anilist") { variables.id = inputId; }
+    else { variables.id = resolved.mediaId; }
+    const { data } = await fetchGraphQL(RELATIONS_QUERY, variables);
+    media = data && data.Media;
+  } catch (err) {
+    return anilistError(res, err, inputId);
+  }
+
+  if (!media) {
+    return jsonResponse(res, 404, {
+      ok: false,
+      status: 404,
+      endpoint: endpointPath,
+      error: `Anime not found for id ${inputId}`,
+      hint: `The entry disappeared between resolution and fetch — it may have been removed from AniList.`,
+    }, { cacheControl: CDN_CACHE_CONTROL });
+  }
+
+  const relations = buildRelations(media.relations);
+  const body = {
+    ok: true,
+    endpoint: endpointPath,
+    source: SOURCE_LINE,
+    detected: buildDetected(inputId, resolved, qIdType, source),
+    cache: cacheInfo(cacheKey, false),
+    base: {
+      mal_id: media.idMal ?? null,
+      anilist_id: media.id,
+      title: (media.title && (media.title.romaji || media.title.userPreferred)) || null,
+    },
+    count: relations.length,
+    data: relations,
+    seasons: buildSeasons(relations),
+    notes: RELATIONS_NOTES,
+  };
+
+  cacheSet(cacheKey, body);
+  return jsonResponse(res, 200, body, { cacheControl: CDN_CACHE_CONTROL });
+}
+
+module.exports = { handleFull, handleEpisodes, handleRelations };

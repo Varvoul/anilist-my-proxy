@@ -126,6 +126,10 @@ async function main() {
   const sourceOk = await testSourceRoutes();
   sourceOk ? pass++ : fail++;
 
+  console.log(colors.cyan("\nRelations (/full data.relations + standalone /relations):\n"));
+  const relOk = await testRelations();
+  relOk ? pass++ : fail++;
+
   console.log(colors.cyan(`\nResult: ${colors.green(pass + " passed")}, ${fail ? colors.red(fail + " failed") : colors.green("0 failed")}\n`));
   process.exit(fail ? 1 : 0);
 }
@@ -220,6 +224,56 @@ async function testSourceRoutes() {
   // 6. friendly error when the id is missing on the source routes
   r = await callEndpoint("/api/mal/full");
   step(r.status === 400 && /Missing anime id/.test(r.json.error || ""), "/api/mal/full (missing id) -> 400 with hint");
+
+  return allOk;
+}
+
+// Tests the relations feature. Returns true if everything passed.
+async function testRelations() {
+  let allOk = true;
+  const step = (ok, label, detail = "") => {
+    if (!ok) allOk = false;
+    console.log((ok ? colors.green("OK  ") : colors.red("FAIL")) + " " + label + colors.dim(detail ? `  ${detail}` : ""));
+  };
+  const entryShapeOk = (e) =>
+    e && e.relation_type && e.relation && Number.isInteger(e.anilist_id) && "mal_id" in e &&
+    e.images && e.images.jpg && e.images.jpg.image_url && "banner_image" in e &&
+    e.titles && typeof e.titles.romaji === "string";
+
+  // 1. /full embeds data.relations (AniList edges) + data.seasons
+  let r = await callEndpoint("/api/anilist/154587/full");
+  const d = r.json && r.json.data;
+  step(r.status === 200 && d && Array.isArray(d.relations) && d.relations.length >= 5, "/api/anilist/154587/full -> data.relations present", d && `${(d.relations || []).length} relations`);
+  const seq = (d && d.relations || []).find((x) => x.relation_type === "SEQUEL");
+  step(seq && seq.anilist_id === 182255 && seq.mal_id === 59978, "SEQUEL -> Sousou no Frieren 2nd Season with both ids", seq && `${seq.anilist_id}/${seq.mal_id}`);
+  step(entryShapeOk(seq), "relation entry shape: ids + cover + banner + anilist-style titles");
+  step(d && d.seasons && Array.isArray(d.seasons.sequels) && d.seasons.sequels.some((x) => x.anilist_id === 182255) && Array.isArray(d.seasons.prequels), "data.seasons prequels/sequels split");
+  step((d && d.relations || []).some((x) => x.type === "manga" && x.mal_id !== null), "manga relation included (SOURCE manga with mal_id)");
+
+  // 2. MAL route returns the same relations
+  r = await callEndpoint("/api/mal/52991/full");
+  const seq2 = r.json && r.json.data && (r.json.data.relations || []).find((x) => x.relation_type === "SEQUEL");
+  step(seq2 && seq2.anilist_id === 182255, "/api/mal/52991/full relations match");
+
+  // 3. Standalone /relations endpoint on all three route flavors
+  for (const path of ["/api/mal/16498/relations", "/api/anilist/16498/relations", "/api/16498/relations"]) {
+    r = await callEndpoint(path);
+    const b = r.json || {};
+    step(r.status === 200 && b.ok && Array.isArray(b.data) && b.count === b.data.length && b.count >= 10 && Array.isArray(b.notes), `${path} -> 200, count=${b.count}`);
+    const relSeq = ((b.data || []).find((x) => x.relation_type === "SEQUEL") || {});
+    step(relSeq.anilist_id === 20958, `${path} -> SEQUEL is AoT S2 (20958)`, String(relSeq.anilist_id));
+    step(b.seasons && b.seasons.prequels.length >= 1 && b.seasons.sequels.length >= 1, `${path} -> seasons split`);
+    step(b.cache && b.cache.ttl_seconds === 14400, `${path} -> 4h cache info`);
+  }
+
+  // 4. Null-safe mal_id (Frieren Part 2 ONA has no MAL entry)
+  r = await callEndpoint("/api/anilist/154587/relations");
+  const nullMal = ((r.json && r.json.data) || []).find((x) => x.mal_id === null);
+  step(!!nullMal && nullMal.url === null && nullMal.anilist_url, "relation without MAL id: mal_id/url null, anilist_url set", nullMal && nullMal.title);
+
+  // 5. Unknown action mentions relations as valid
+  r = await callEndpoint("/api/mal/16498/bogus");
+  step(r.status === 404 && (r.json && r.json.validActions || []).includes("relations"), "unknown action -> validActions includes relations");
 
   return allOk;
 }

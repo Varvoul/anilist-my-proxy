@@ -1,6 +1,6 @@
 {
   "name": "anilist-my-proxy",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Categorized AniList GraphQL proxy with paginated category endpoints, plus Jikan-style item endpoints addressed by explicit id source (/api/mal/{mal_id}/full|episodes, /api/anilist/{anilist_id}/full|episodes) or auto-detected generic /api/{id}/full|episodes. Server-side 4h cache. Returns both AniList id and MyAnimeList idMal.",
   "private": true,
   "license": "MIT",
