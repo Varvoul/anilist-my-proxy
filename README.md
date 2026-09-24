@@ -172,6 +172,30 @@ documenting this.
 | `endAfter` | Date | — | `endDate >` |
 | `endBefore` | Date | — | `endDate <` |
 | `isAdult` | Bool | false | Set `true` or `1` to include adult content |
+| `rawPagination` | Bool | false | Set `true` to return AniList's verbatim (capped) pageInfo instead of the exact pagination |
+
+## Pagination (accurate by default)
+
+AniList's own `pageInfo` is approximate: `total` is hard-capped at 5000 and
+`lastPage` at 250, and past the end of the data `total` silently degrades to
+`(page-1) * perPage`. Reading page 1 of `/api/currently-airing` therefore
+reports `total: 5000 / lastPage: 250` even though the category truly ends at
+page 9 with 171 entries — the numbers contradict each other across pages.
+
+This proxy fixes that. The `pagination` block keeps AniList's exact field
+shape but now carries **true, self-consistent values**:
+
+- `total` — real number of entries matching the filters
+- `lastPage` — real last page that contains data (`ceil(total / perPage)`)
+- `hasNextPage` — reliable end-of-data signal
+- `currentPage`, `perPage` — echo of the request
+
+Responses also include `pagination_source` (`"exact"` or `"anilist-raw"`) and
+`pagination_probes` (how many id-only AniList probes were used; `0` when the
+current page alone was enough to compute everything). If probes fail or exceed
+their time/probe budget, the response falls back to AniList's verbatim pageInfo
+with a `pagination_note` explaining why — the endpoint never breaks because of
+this. Pass `?rawPagination=true` if you specifically want AniList's raw block.
 
 ## Example calls
 
@@ -192,7 +216,9 @@ documenting this.
   "description": "...",
   "defaults": { "status": "RELEASING", "sort": ["POPULARITY_DESC"], "applyWindow": null },
   "applied": { "page": 1, "perPage": 20, "type": "ANIME", "status": "RELEASING", "sort": ["POPULARITY_DESC"], ... },
-  "pagination": { "total": 5000, "currentPage": 1, "lastPage": 250, "hasNextPage": true, "perPage": 20 },
+  "pagination": { "total": 171, "currentPage": 1, "lastPage": 9, "hasNextPage": true, "perPage": 20 },
+  "pagination_source": "exact",
+  "pagination_probes": 7,
   "count": 20,
   "data": [
     {

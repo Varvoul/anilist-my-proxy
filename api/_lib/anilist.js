@@ -10,6 +10,19 @@
 
 const ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
 
+// AniList's hard cap: page > 250 is rejected with HTTP 400 ("Page depth exceeds
+// maximum allowed for API requests (5000 entries)"). Data can never span more
+// than 250 pages, which bounds every pagination probe below.
+const ANILIST_PAGE_CAP = 250;
+
+// Wall-clock guard for the extra probes used to compute exact pagination.
+// Typical AniList round-trip is 300-600 ms; worst case (8 bisect probes) stays
+// well inside Vercel Hobby's function timeout. On breach we fall back to
+// AniList's verbatim pageInfo rather than failing the request.
+const PAGINATION_PROBE_BUDGET_MS = 5000;
+const PAGINATION_PROBE_TIMEOUT_MS = 4500;
+const PAGINATION_MAX_PROBES = 9;
+
 // -----------------------------------------------------------------------------
 // GraphQL query
 // -----------------------------------------------------------------------------
@@ -182,13 +195,64 @@ function parseQueryParams(query) {
 }
 
 // -----------------------------------------------------------------------------
+// Minimal probe query — used ONLY to locate the true end of a category's data.
+// Asks for nothing but media ids so each probe is as cheap as possible.
+// IMPORTANT: it must apply the EXACT same media filters as the main query
+// (status, sort, isAdult, date windows, ...) or the detected end page would
+// describe a different dataset than the one being served.
+// -----------------------------------------------------------------------------
+const PROBE_QUERY = `
+query (
+  $page: Int,
+  $perPage: Int,
+  $type: MediaType,
+  $status: MediaStatus,
+  $sort: [MediaSort],
+  $season: MediaSeason,
+  $seasonYear: Int,
+  $format: MediaFormat,
+  $genre: String,
+  $startDate_greater: FuzzyDateInt,
+  $startDate_lesser: FuzzyDateInt,
+  $endDate_greater: FuzzyDateInt,
+  $endDate_lesser: FuzzyDateInt,
+  $averageScore_greater: Int,
+  $averageScore_lesser: Int,
+  $popularity_greater: Int,
+  $isAdult: Boolean
+) {
+  Page(page: $page, perPage: $perPage) {
+    media(
+      type: $type,
+      status: $status,
+      sort: $sort,
+      season: $season,
+      seasonYear: $seasonYear,
+      format: $format,
+      genre: $genre,
+      startDate_greater: $startDate_greater,
+      startDate_lesser: $startDate_lesser,
+      endDate_greater: $endDate_greater,
+      endDate_lesser: $endDate_lesser,
+      averageScore_greater: $averageScore_greater,
+      averageScore_lesser: $averageScore_lesser,
+      popularity_greater: $popularity_greater,
+      isAdult: $isAdult
+    ) {
+      id
+    }
+  }
+}
+`;
+
+// -----------------------------------------------------------------------------
 // AniList client
 // -----------------------------------------------------------------------------
-async function fetchAnilist(variables) {
-  const body = JSON.stringify({ query: ANILIST_QUERY, variables });
+async function postGraphql(query, variables, timeoutMs) {
+  const body = JSON.stringify({ query, variables });
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs || 15000);
 
   try {
     const res = await fetch(ANILIST_GRAPHQL_URL, {
@@ -228,6 +292,98 @@ async function fetchAnilist(variables) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchAnilist(variables) {
+  return postGraphql(ANILIST_QUERY, variables, 15000);
+}
+
+// -----------------------------------------------------------------------------
+// Exact pagination
+// -----------------------------------------------------------------------------
+// WHY THIS EXISTS
+//   AniList's own pageInfo is approximate and inconsistent:
+//     - `total` is hard-capped at 5000 and `lastPage` at 250 whenever the real
+//       numbers would exceed them (e.g. airing pages 1-8 report 5000/250 even
+//       though the category truly ends at page 9 with 171 entries).
+//     - On pages past the end, `total` silently degrades to (page-1)*perPage
+//       (e.g. upcoming page 249 reports 4960, page 250 reports 4980).
+//   So a consumer reading `total`/`lastPage` from page 1 cannot trust them:
+//   the numbers contradict what later pages report. This module computes the
+//   TRUE values while keeping AniList's exact response shape.
+//
+// HOW
+//   - Partial page (0 < items < perPage): authoritative end — total =
+//     (page-1)*perPage + items, lastPage = page. Zero extra requests.
+//   - Full page + hasNextPage=false: the category size is an exact multiple of
+//     perPage — total = page*perPage, lastPage = page. Zero extra requests.
+//   - Full page + hasNextPage=true, or empty page: binary-search AniList for
+//     the last page that still returns items (bounded by ANILIST_PAGE_CAP).
+//     Each probe asks only for media ids with the SAME filters as the main
+//     query, is time-boxed, and capped at PAGINATION_MAX_PROBES requests.
+//   - Any probe failure / budget breach: fall back to AniList's verbatim
+//     pageInfo so the endpoint never breaks because of this enhancement.
+//
+// `probePage(variables, page)` must return { ok, count } for the given page
+// using the caller's media filters. Injectable for unit tests.
+async function computeExactPagination(pageInfo, media, cleanVars, probePage) {
+  const pp = cleanVars.perPage || 20;
+  const N = pageInfo.currentPage || cleanVars.page || 1;
+  const C = Array.isArray(media) ? media.length : 0;
+  const H = pageInfo.hasNextPage;
+
+  const deadline = Date.now() + PAGINATION_PROBE_BUDGET_MS;
+  let probes = 0;
+
+  async function probe(page) {
+    if (probes >= PAGINATION_MAX_PROBES) throw new Error(`probe budget exceeded (${PAGINATION_MAX_PROBES} probes)`);
+    if (Date.now() > deadline) throw new Error('pagination probe time budget exhausted');
+    probes += 1;
+    const r = await probePage(cleanVars, page);
+    if (!r.ok) throw new Error(`probe page ${page} failed: ${r.error || 'unknown'}`);
+    return r.count;
+  }
+
+  // Last page in [lo, hi] that still returns items, or null if none does.
+  async function lastNonEmptyPage(lo, hi) {
+    let best = null;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const count = await probe(mid);
+      if (count > 0) { best = { page: mid, count }; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return best;
+  }
+
+  const finish = (total, lastPage, hasNextPage) => ({
+    pagination: { total, currentPage: N, lastPage, hasNextPage, perPage: pp },
+    probes,
+  });
+
+  if (C === 0 && N <= 1) return finish(0, 0, false);           // category is empty
+
+  if (C === 0) {
+    // Past the end: find the real last page between 1 and N-1.
+    const L = await lastNonEmptyPage(1, N - 1);
+    if (!L) return finish(0, 0, false);
+    return finish((L.page - 1) * pp + L.count, L.page, false);
+  }
+
+  if (C < pp) {
+    // Partial page = authoritative end of data. (AniList never returns a short
+    // page mid-dataset; if hasNextPage ever contradicts this, fall back.)
+    if (H === true) throw new Error('ambiguous pageInfo: partial page with hasNextPage=true');
+    return finish((N - 1) * pp + C, N, false);
+  }
+
+  // Full page (C === pp)
+  if (H === false) return finish(N * pp, N, false);            // exact multiple of perPage
+  if (N >= ANILIST_PAGE_CAP) return finish(N * pp, N, true);   // hard cap reached; deeper data is unreachable
+
+  const L = await lastNonEmptyPage(N + 1, ANILIST_PAGE_CAP);
+  if (!L) throw new Error('contradictory pageInfo: hasNextPage=true but no later page has items');
+  return finish((L.page - 1) * pp + L.count, L.page, true);
 }
 
 // -----------------------------------------------------------------------------
@@ -321,6 +477,29 @@ function buildHandler(category) {
       const pageInfo = page.pageInfo;
       const media = page.media;
 
+      // -------------------------------------------------------------------
+      // Pagination — exact & self-consistent by default.
+      // AniList's raw pageInfo caps total at 5000 / lastPage at 250 and
+      // degrades past the end of data, so `total` and `lastPage` read from
+      // page 1 contradict what pages 9/249/250 report. We compute the TRUE
+      // values (same field names/shape) with a handful of cheap id-only
+      // probes; `?rawPagination=true` restores the verbatim AniList block.
+      // -------------------------------------------------------------------
+      let pagination = pageInfo;
+      let pagination_source = "anilist-raw (verbatim; pass ?rawPagination=true to force)";
+      let pagination_probes;
+      let pagination_note;
+      if (String(query.rawPagination || "").toLowerCase() !== "true") {
+        try {
+          const ex = await computeExactPagination(pageInfo, media, cleanVars, probePageFor);
+          pagination = ex.pagination;
+          pagination_source = "exact";
+          pagination_probes = ex.probes;
+        } catch (e) {
+          pagination_note = `exact pagination unavailable (${(e && e.message) || e}) — reporting AniList's raw pageInfo`;
+        }
+      }
+
       // Build the response body
       const body = {
         ok: true,
@@ -347,41 +526,25 @@ function buildHandler(category) {
           averageScore_greater: cleanVars.averageScore_greater || null,
           averageScore_lesser: cleanVars.averageScore_lesser || null,
         },
-        pagination: pageInfo,
+        pagination,
+        pagination_source,
+        ...(pagination_probes !== undefined ? { pagination_probes } : {}),
+        ...(pagination_note ? { pagination_note } : {}),
         count: media.length,
         data: media,
       };
 
       // Helpful hint when the user paginated past the end of results.
-      // AniList's `total` field is capped at 5000 and can be misleading,
-      // so we check the *actual* end-of-data signal: hasNextPage=false AND
-      // currentPage > 1 AND no data returned (or currentPage > lastPage).
-      const currentPage = pageInfo.currentPage || cleanVars.page;
-      const lastPage = pageInfo.lastPage;
-      const hasNext = pageInfo.hasNextPage;
-      if (
-        media.length === 0 &&
-        currentPage > 1 &&
-        hasNext === false
-      ) {
-        // AniList's lastPage can be wrong (derived from capped total), so the
-        // *previous* page is the most reliable suggestion — it's the last
-        // page we know existed and had data, OR if even that was empty, fall
-        // back to page 1 which always has data on a non-empty category.
-        const prevPage = Math.max(1, currentPage - 1);
+      // With exact pagination in place, total/lastPage can be trusted.
+      const currentPage = pagination.currentPage || cleanVars.page;
+      const lastPage = pagination.lastPage;
+      if (media.length === 0 && currentPage > 1) {
         body.hint =
-          `Requested page ${currentPage} returned no results because you have paginated past the end of the data. ` +
-          `Try ?page=1 (always safe) or ?page=${prevPage} (the previous page, which is likely the last one with data). ` +
-          `Tip: trust \`pagination.hasNextPage\` rather than \`lastPage\` — AniList caps \`total\` at 5000, so \`lastPage\` can be inaccurate.`;
-      } else if (
-        media.length === 0 &&
-        currentPage > 1 &&
-        lastPage &&
-        currentPage > lastPage
-      ) {
-        body.hint =
-          `Requested page ${currentPage} is past the last page (${lastPage}). ` +
-          `Try ?page=${lastPage} or ?page=1.`;
+          `Requested page ${currentPage} returned no results because it is past the end of the data. ` +
+          `This category has total=${pagination.total} entries across lastPage=${lastPage} (perPage=${pagination.perPage}). ` +
+          `Try ?page=${Math.max(1, lastPage)} or ?page=1.`;
+      } else if (media.length === 0 && currentPage <= 1) {
+        body.hint = "This category currently has no entries for the applied filters.";
       }
 
       return jsonResponse(res, 200, body);
@@ -398,11 +561,25 @@ function buildHandler(category) {
   };
 }
 
+async function probePageFor(variables, page) {
+  try {
+    const data = await postGraphql(PROBE_QUERY, { ...variables, page }, PAGINATION_PROBE_TIMEOUT_MS);
+    const items = data && data.Page && Array.isArray(data.Page.media) ? data.Page.media : null;
+    if (!items) return { ok: false, error: "malformed probe response" };
+    return { ok: true, count: items.length };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+}
+
 module.exports = {
   ANILIST_QUERY,
+  ANILIST_PAGE_CAP,
   fetchAnilist,
   parseQueryParams,
   buildHandler,
+  computeExactPagination,
+  probePageFor,
   fuzzyDateIntDaysAgo,
   parseFuzzyDateInt,
   jsonResponse,
