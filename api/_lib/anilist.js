@@ -21,7 +21,8 @@ const ANILIST_PAGE_CAP = 250;
 // AniList's verbatim pageInfo rather than failing the request.
 const PAGINATION_PROBE_BUDGET_MS = 5000;
 const PAGINATION_PROBE_TIMEOUT_MS = 4500;
-const PAGINATION_MAX_PROBES = 9;
+// log2(250) ≈ 8 — one full binary search over AniList's page cap.
+const PAGINATION_MAX_PROBES = 8;
 
 // -----------------------------------------------------------------------------
 // GraphQL query
@@ -545,6 +546,10 @@ function buildHandler(category) {
           `Try ?page=${Math.max(1, lastPage)} or ?page=1.`;
       } else if (media.length === 0 && currentPage <= 1) {
         body.hint = "This category currently has no entries for the applied filters.";
+      } else if (pagination_source !== "exact" && media.length > 0) {
+        body.hint =
+          "Pagination shown is AniList's raw pageInfo (total/lastPage are capped or approximate). " +
+          "Exact values could not be computed right now — retry shortly for pagination_source=exact.";
       }
 
       return jsonResponse(res, 200, body);
