@@ -556,12 +556,15 @@ function buildHandler(category) {
     } catch (err) {
       console.error(`[${category.name}] error:`, err.message);
       const status = err.status || 500;
+      // Never CDN-cache error responses: a transient AniList 429/5xx (or the
+      // depth-cap 400) must not stick at the edge for s-maxage=300 and get
+      // replayed to every consumer for 5 minutes.
       return jsonResponse(res, status, {
         ok: false,
         category: category.name,
         error: err.message,
         ...(err.payload ? { details: err.payload } : {}),
-      });
+      }, { cacheControl: "no-store" });
     }
   };
 }
