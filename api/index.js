@@ -149,6 +149,23 @@ const QUERY_PARAMS = [
   { name: "isAdult",         type: "Bool",   default: false, description: "Include adult content. true / 1 to enable." },
 ];
 
+const SEARCH_ENDPOINTS = [
+  {
+    path: "/api/search/anime",
+    description: "Full-text anime search on AniList (SEARCH_MATCH ranking). Returns ranked candidates with both ids, titles (romaji/english/native), format, dates, images and siteUrl. Built for the al-ji automation: when a mal_id has no AniList entry, search by the stored title to find the correct AniList entry - the consumer is responsible for verifying the match (exact-title / idMal agreement) before storing anything.",
+    queryParameters: [
+      { name: "q",       type: "String", required: true, description: "Title text to search for (2-120 characters)." },
+      { name: "page",    type: "Int",    default: 1,  description: "Page number (1-indexed)." },
+      { name: "perPage", type: "Int",    default: 10, description: "Candidates per page (1-50)." },
+    ],
+    cache: "CDN cache 30 min (s-maxage=1800); no server-side cache (unbounded query space).",
+    exampleUsage: [
+      "/api/search/anime?q=cowboy%20bebop",
+      "/api/search/anime?q=kimi%20no%20na%20wa&perPage=5",
+    ],
+  },
+];
+
 module.exports = (req, res) => {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -161,13 +178,15 @@ module.exports = (req, res) => {
   return jsonResponse(res, 200, {
     ok: true,
     name: "anilist-my-proxy",
-    version: "1.3.0",
+    version: "1.4.0",
     description:
       "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry. Item endpoints accept a MAL id or an AniList id: explicit-source routes /api/mal/{mal_id}/full|episodes|relations and /api/anilist/{anilist_id}/full|episodes|relations (recommended), or the auto-detecting generic /api/{id}/full, /api/{id}/episodes and /api/{id}/relations. All item data is Jikan (MyAnimeList API v4) style; relations are AniList style.",
     categories: CATEGORIES,
     itemEndpoints: ITEM_ENDPOINTS,
+    searchEndpoints: SEARCH_ENDPOINTS,
     queryParameters: QUERY_PARAMS,
     exampleUsage: [
+      "/api/search/anime?q=frieren",
       "/api/currently-airing?page=1&perPage=20",
       "/api/top-airing?genre=Action&minScore=80",
       "/api/recently-completed?page=2&perPage=50",
