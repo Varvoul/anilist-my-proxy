@@ -99,14 +99,20 @@ query ($alId: Int, $malId: Int, $page: Int, $perPage: Int) {
 
 function cacheInfo(key, hit, builtAt) {
   const now = Date.now();
-  if (!hit || !builtAt) {
-    return { enabled: true, hit: false, key, ttl_seconds: Math.floor(TTL_MS / 1000) };
-  }
+  const base = {
+    enabled: true,
+    key,
+    ttl_seconds: Math.floor(TTL_MS / 1000),
+    // Vercel's edge caches this exact URL (s-maxage=14400) — repeat requests
+    // are served the frozen body below; the x-vercel-cache response header
+    // shows HIT/MISS. In-instance memory hits report hit:true here.
+    edge: "exact-URL edge cache (s-maxage=14400); any param change = new key = fresh fetch",
+  };
+  if (!hit || !builtAt) return { ...base, hit: false };
   const expiresAt = builtAt + TTL_MS;
   return {
-    enabled: true,
+    ...base,
     hit: true,
-    key,
     cached_at: new Date(builtAt).toISOString(),
     expires_at: new Date(expiresAt).toISOString(),
     age_seconds: Math.max(0, Math.floor((now - builtAt) / 1000)),
@@ -212,7 +218,12 @@ async function buildForMedia(query) {
     throw err;
   }
 
-  const data = await fetchAnilist2(RECS_FOR_MEDIA_QUERY, { alId, malId, page, perPage });
+  const data = await fetchAnilist2(RECS_FOR_MEDIA_QUERY, {
+    page,
+    perPage,
+    ...(alId ? { alId } : {}),
+    ...(malId ? { malId } : {}),
+  });
   const media = data && data.Media;
   if (!media || !media.id) {
     const err = new Error(`No anime found for ${alId ? `anilist id ${alId}` : `mal id ${malId}`}`);
