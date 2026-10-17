@@ -16,6 +16,7 @@ const CATEGORIES = [
   { path: "/api/most-favourite",    defaults: { sort: ["FAVOURITES_DESC"] },                                description: "Most favourited anime of all time." },
   { path: "/api/new-added",         defaults: { sort: ["ID_DESC"] },                                         description: "Newest entries added to AniList's database." },
   { path: "/api/popular",           defaults: { sort: ["POPULARITY_DESC"] },                                description: "Most popular anime of all time." },
+  { path: "/api/top-rated",         defaults: { sort: ["SCORE_DESC"] },                                     description: "Highest rated anime of all time." },
 ];
 
 const ITEM_ENDPOINTS = [

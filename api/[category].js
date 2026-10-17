@@ -85,6 +85,11 @@ const CATEGORIES = {
     description: "Most popular anime of all time (sort POPULARITY_DESC).",
     defaults: { sort: ["POPULARITY_DESC"] },
   },
+  "top-rated": {
+    name: "top-rated",
+    description: "Highest-rated anime of all time (sort SCORE_DESC).",
+    defaults: { sort: ["SCORE_DESC"] },
+  },
 };
 
 // Vercel passes the route parameter as `req.query.category`.
