@@ -167,6 +167,33 @@ const SEARCH_ENDPOINTS = [
   },
 ];
 
+const SCHEDULE_ENDPOINTS = [
+  {
+    path: "/api/schedule/{day}",
+    description: "Currently-airing anime broadcast schedule separated by broadcast day. `day` = monday..sunday (JST broadcast day, same convention as AniList/MAL), `today` (resolves to the current JST weekday), or `all` (all seven days grouped in one call). Built on AniList's airingSchedules — every entry is a REAL scheduled broadcast carrying the TRUE episode number, unlike MAL/Jikan day schedules where consumers had to estimate episodes from week diffs. Response follows AniList format: data.Page.pageInfo + data.Page.airingSchedules[{ id, airingAt, timeUntilAiring, episode, media{...} }]; /all additionally returns data.Page.days{ monday:[...], ... } + dayInfo.",
+    queryParameters: [
+      { name: "page",           type: "Int",    default: 1,   description: "Page number (1-indexed)." },
+      { name: "per_page",       type: "Int",    default: 500, description: "Items per page (1-500). A single day rarely exceeds ~60 entries." },
+      { name: "sort",           type: "Enum",   default: "time", description: "time (chronological), popularity, score, title." },
+      { name: "format",         type: "Enum",   default: null, description: "TV, TV_SHORT, OVA, ONA, MOVIE, SPECIAL, MUSIC — one or comma-separated." },
+      { name: "genres",         type: "String", default: null, description: "Comma-separated AniList genre names, case-insensitive, ANY-match (e.g. Action,Fantasy)." },
+      { name: "min_score",      type: "Int",    default: null, description: "Minimum averageScore (0-100)." },
+      { name: "max_score",      type: "Int",    default: null, description: "Maximum averageScore (0-100)." },
+      { name: "min_popularity", type: "Int",    default: null, description: "Minimum popularity." },
+      { name: "nsfw",           type: "Bool",   default: false, description: "true/1 to INCLUDE adult entries (excluded by default)." },
+      { name: "refresh",        type: "Bool",   default: false, description: "1 to bypass cache reads (response is still re-cached)." },
+    ],
+    cache: "Server-side 4h TTL on the raw 8-day AniList window (all filter variants are computed from the SAME cached window — zero extra AniList calls) + CDN s-maxage=7200, stale-while-revalidate=86400. Prefer the absolute `airingAt` epoch for countdowns; timeUntilAiring can lag on edge hits.",
+    exampleUsage: [
+      "/api/schedule/monday",
+      "/api/schedule/today",
+      "/api/schedule/all",
+      "/api/schedule/friday?format=TV&min_score=70",
+      "/api/schedule/saturday?genres=Action,Comedy&sort=popularity",
+    ],
+  },
+];
+
 module.exports = (req, res) => {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -185,8 +212,10 @@ module.exports = (req, res) => {
     categories: CATEGORIES,
     itemEndpoints: ITEM_ENDPOINTS,
     searchEndpoints: SEARCH_ENDPOINTS,
+    scheduleEndpoints: SCHEDULE_ENDPOINTS,
     queryParameters: QUERY_PARAMS,
     exampleUsage: [
+      "/api/schedule/today",
       "/api/search/anime?q=frieren",
       "/api/currently-airing?page=1&perPage=20",
       "/api/top-airing?genre=Action&minScore=80",
