@@ -258,10 +258,16 @@ async function getWindow(refresh) {
       return { ...cached, hit: true };
     }
   }
-  const startSec = jstMidnightTodaySec(Date.now());
-  const endSec = startSec + WINDOW_DAYS * 86400;
+  // AniList airingAt_greater is STRICT — queried as-is, an entry airing at
+  // exactly 00:00:00 JST (a very common late-night broadcast slot, e.g. BLEACH)
+  // would fall outside the window of the very day it belongs to. Pull the
+  // query start back by 1 second so the midnight instant is included; the
+  // weekday grouping (jstWeekdayIndex) still buckets it correctly.
+  const winStart = jstMidnightTodaySec(Date.now());
+  const startSec = winStart - 1;
+  const endSec = winStart + WINDOW_DAYS * 86400;
   const items = await fetchWindowItems(startSec, endSec);
-  const win = { items, fetchedAt: Date.now(), start: startSec, end: endSec };
+  const win = { items, fetchedAt: Date.now(), start: winStart, end: endSec };
   cacheSet(WINDOW_KEY, win);
   return { ...win, hit: false };
 }
