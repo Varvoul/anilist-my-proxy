@@ -3,7 +3,9 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/", "destination": "/api" }
+    { "source": "/", "destination": "/api" },
+    { "source": "/voice-actors/:name", "destination": "/api/staff/:name?alias=voice-actors" },
+    { "source": "/cast/:name", "destination": "/api/staff/:name?alias=cast" }
   ],
   "headers": [
     {

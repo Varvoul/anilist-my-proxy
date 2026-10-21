@@ -194,6 +194,78 @@ const SCHEDULE_ENDPOINTS = [
   },
 ];
 
+const BROWSE_ENDPOINTS = [
+  {
+    path: "/api/season/{season}/{year}",
+    description: "AniList-style seasonal browse: every anime of one season. `season` = WINTER | SPRING | SUMMER | FALL (case-insensitive); also /api/season/current (resolves the current JST season) and /api/season (usage doc). Response: data.Page.pageInfo + data.Page.media[] in verbatim AniList Media shape.",
+    queryParameters: [
+      { name: "page",        type: "Int",    default: 1,    description: "Page number (1-indexed)." },
+      { name: "perPage",     type: "Int",    default: 20,   description: "1-50." },
+      { name: "sort",        type: "Enum",   default: "POPULARITY_DESC", description: "Comma-separated MediaSort (invalid tokens dropped). e.g. SCORE_DESC, START_DATE_DESC, TRENDING_DESC, FAVOURITES_DESC." },
+      { name: "format",      type: "Enum",   default: null, description: "TV, TV_SHORT, MOVIE, SPECIAL, OVA, ONA, MUSIC (single)." },
+      { name: "format_in",   type: "Enum",   default: null, description: "Comma-separated MediaFormat." },
+      { name: "status",      type: "Enum",   default: null, description: "FINISHED, RELEASING, NOT_YET_RELEASED, CANCELLED, HIATUS (single)." },
+      { name: "status_in",   type: "Enum",   default: null, description: "Comma-separated MediaStatus." },
+      { name: "genre",       type: "String", default: null, description: "Single AniList genre, canonicalized case-insensitively." },
+      { name: "genres",      type: "String", default: null, description: "Comma-separated genres -> AniList genre_in (genre_in also accepted)." },
+      { name: "tags",        type: "String", default: null, description: "Comma-separated AniList tag names -> tag_in." },
+      { name: "search",      type: "String", default: null, description: "Free-text within the season." },
+      { name: "minScore",    type: "Int",    default: null, description: "averageScore_greater (0-100)." },
+      { name: "maxScore",    type: "Int",    default: null, description: "averageScore_lesser." },
+      { name: "minPopularity", type: "Int",  default: null, description: "popularity_greater." },
+      { name: "country",     type: "String", default: null, description: "countryOfOrigin ISO 3166-1 alpha-2 (JP, KR, ...)." },
+      { name: "nsfw",        type: "Bool",   default: false, description: "false (default) = SFW (isAdult:false). true = omits the isAdult filter entirely (everything, not adult-only)." },
+      { name: "type",        type: "Enum",   default: "ANIME", description: "ANIME | MANGA." },
+      { name: "refresh",     type: "Bool",   default: false, description: "1 to bypass cache reads (response is still re-cached)." },
+    ],
+    cache: "Exact-key TTL cache (path + every normalized param): in-memory 4h (shared store) + CDN s-maxage=14400, stale-while-revalidate=86400. ANY parameter/filter change = new key = fresh AniList fetch. Errors are never cached.",
+    exampleUsage: [
+      "/api/season/winter/2026",
+      "/api/season/current",
+      "/api/season/fall/2026?format=TV&sort=POPULARITY_DESC&perPage=10",
+      "/api/season/spring/2025?genres=Action,Comedy&minScore=75",
+      "/api/season/summer/2024?tags=Isekai&nsfw=true&page=2",
+    ],
+  },
+  {
+    path: "/api/studio/{studio}",
+    description: "AniList-style studio profile: metadata + the studio's media connection. Text paths search AniList studios case-insensitively (spaces or kebab-case both work — a kebab name auto-retries with spaces); numeric paths address exact AniList studio ids (/api/studio/4 = bones). Response: data.Studio { id, name, favourites, isAnimationStudio, siteUrl, media: { pageInfo, edges: [{ isMainStudio, node: {...full AniList Media} }] } }.",
+    queryParameters: [
+      { name: "page",     type: "Int",  default: 1,    description: "Page number for the studio's media connection." },
+      { name: "perPage",  type: "Int",  default: 20,   description: "1-50." },
+      { name: "sort",     type: "Enum", default: "POPULARITY_DESC", description: "Comma-separated MediaSort. Useful: START_DATE_DESC, SCORE_DESC, FAVOURITES_DESC." },
+      { name: "isMain",   type: "Bool", default: null, description: "true = only media where the studio is the MAIN animation studio. Default (omitted) = AniList's unfiltered behavior (co-productions included)." },
+      { name: "refresh",  type: "Bool", default: false, description: "1 to bypass cache reads (response is still re-cached)." },
+    ],
+    cache: "Same exact-key TTL cache as /api/season (in-memory 4h + edge s-maxage=14400 + SWR). Any param/filter change = fresh fetch. Not-found (404) responses are never cached.",
+    exampleUsage: [
+      "/api/studio/bones",
+      "/api/studio/Kyoto%20Animation?perPage=5",
+      "/api/studio/kyoto-animation?isMain=true",
+      "/api/studio/4?sort=START_DATE_DESC",
+    ],
+  },
+  {
+    path: "/api/staff/{name}",
+    description: "AniList-style voice-actor / cast-member profile: full Staff metadata + characterMedia (every character they voice, with character info + the show) + staffMedia (production credits on anime). Aliases with identical payloads: /voice-actors/{name} and /cast/{name} (Vercel rewrites; all three shapes share one cache entry). Text paths search case-insensitively (kebab-case auto-retries with spaces); numeric paths address exact AniList staff ids (/api/staff/106817).",
+    queryParameters: [
+      { name: "page",         type: "Int",  default: 1,    description: "Page number for characterMedia (voiced roles)." },
+      { name: "perPage",      type: "Int",  default: 20,   description: "1-50 — voiced-role entries per page." },
+      { name: "sort",         type: "Enum", default: "POPULARITY_DESC", description: "Comma-separated MediaSort. Useful: FAVOURITES_DESC, SCORE_DESC." },
+      { name: "mainRoles",    type: "Bool", default: null, description: "true = keep only characterRole=MAIN edges. LOCAL filter on the fetched page (AniList has no server-side isMain here); effect reported in pagination_note." },
+      { name: "staffPerPage", type: "Int",  default: 12,   description: "1-25 — production-credit entries (staffMedia)." },
+      { name: "refresh",      type: "Bool", default: false, description: "1 to bypass cache reads (response is still re-cached)." },
+    ],
+    cache: "Same exact-key TTL cache (in-memory 4h + edge s-maxage=14400 + SWR). Any param/filter change = fresh fetch. Not-found (404) responses are never cached.",
+    exampleUsage: [
+      "/api/staff/Yoshitsugu%20Matsuoka",
+      "/api/staff/106817?mainRoles=true",
+      "/voice-actors/rie-takahashi",
+      "/cast/Rie%20Takahashi?perPage=10",
+    ],
+  },
+];
+
 module.exports = (req, res) => {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -206,13 +278,14 @@ module.exports = (req, res) => {
   return jsonResponse(res, 200, {
     ok: true,
     name: "anilist-my-proxy",
-    version: "1.4.0",
+    version: "1.5.0",
     description:
       "Categorized AniList proxy. Each /api/<category> endpoint returns paginated anime data with both AniList id and MyAnimeList idMal for every entry. Item endpoints accept a MAL id or an AniList id: explicit-source routes /api/mal/{mal_id}/full|episodes|relations and /api/anilist/{anilist_id}/full|episodes|relations (recommended), or the auto-detecting generic /api/{id}/full, /api/{id}/episodes and /api/{id}/relations. All item data is Jikan (MyAnimeList API v4) style; relations are AniList style.",
     categories: CATEGORIES,
     itemEndpoints: ITEM_ENDPOINTS,
     searchEndpoints: SEARCH_ENDPOINTS,
     scheduleEndpoints: SCHEDULE_ENDPOINTS,
+    browseEndpoints: BROWSE_ENDPOINTS,
     queryParameters: QUERY_PARAMS,
     exampleUsage: [
       "/api/schedule/today",
@@ -222,6 +295,11 @@ module.exports = (req, res) => {
       "/api/recently-completed?page=2&perPage=50",
       "/api/trending-week?year=2026&season=SUMMER",
       "/api/popular?sort=SCORE_DESC,POPULARITY_DESC",
+      "/api/season/winter/2026?format=TV&sort=POPULARITY_DESC",
+      "/api/season/current",
+      "/api/studio/bones?isMain=true",
+      "/api/staff/Yoshitsugu%20Matsuoka?mainRoles=true",
+      "/voice-actors/rie-takahashi",
     ],
     dataSchema:
       "Every entry in the `data` array contains: id (AniList), idMal (MyAnimeList), title, coverImage, bannerImage, episodes, duration, status, season, seasonYear, format, source, averageScore, meanScore, popularity, favourites, startDate, endDate, nextAiringEpisode, genres, studios, siteUrl, trailer.",

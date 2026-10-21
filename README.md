@@ -22,6 +22,32 @@ Every endpoint returns paginated anime data with **both the AniList `id` and the
 | `/api/popular` | — | POPULARITY_DESC | All-time most popular |
 | `/api` | — | — | Self-documenting landing page listing all categories & params |
 
+## Browse endpoints (season / studio / staff)
+
+AniList-style browse endpoints: proxy meta (`ok`, `endpoint`, `cache`, `applied`,
+`count`) at the top, the verbatim AniList payload nested under
+`data.Page` / `data.Studio` / `data.Staff`. Caching is **exact-key TTL**:
+the cache key is the path + every normalized query parameter, so **any
+parameter/filter change = a new key = a fresh AniList fetch** (in-memory 4h TTL
++ CDN `s-maxage=14400`, `stale-while-revalidate=86400`; `?refresh=1` bypasses
+both cache reads; errors are never cached).
+
+| Path | Description |
+|---|---|
+| `/api/season/{season}/{year}` | Every anime of one season — `season` = WINTER \| SPRING \| SUMMER \| FALL (case-insensitive). Full AniList media filter set: `sort`, `format`, `format_in`, `status`, `status_in`, `genre`/`genres`, `tags`, `search`, `minScore`/`maxScore`, `minPopularity`, `country`, date windows, `nsfw`, `type`, `page`, `perPage` |
+| `/api/season/current` | Resolves the current JST season/year and serves the same payload |
+| `/api/season` | Usage doc (all filters + allowed enum values) |
+| `/api/studio/{studio}` | Studio profile + media connection (`page`, `perPage`, `sort`, `isMain`). Text paths search case-insensitively (kebab-case auto-retries with spaces); numeric paths address exact AniList studio ids |
+| `/api/staff/{name}` | Voice-actor / cast-member profile: Staff metadata + `characterMedia` (voiced roles: character info + the show) + `staffMedia` (production credits). Params: `page`, `perPage`, `sort`, `mainRoles` (local MAIN-only filter, honestly reported), `staffPerPage` |
+| `/voice-actors/{name}` | Alias of `/api/staff/{name}` (Vercel rewrite; shares the same cache entry) |
+| `/cast/{name}` | Alias of `/api/staff/{name}` (Vercel rewrite; shares the same cache entry) |
+
+Not-found studio/staff lookups answer `404` with `data.{Studio\|Staff}: null`
+(AniList's own search-miss semantics, normalized) and are never cached.
+Known upstream quirk: AniList caps/stretches `pageInfo` totals on some queries
+(`total` maxes at 5000) — trust `hasNextPage` for termination, exactly like
+AniList's own clients.
+
 ## Item endpoints (single anime)
 
 Item endpoints come in two flavors. **Explicit id-source routes are recommended**
