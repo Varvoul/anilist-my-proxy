@@ -6,10 +6,11 @@
 // Usage: node scripts/t128_local_test.js
 const assert = require("assert");
 
-const seasonHandler = require("../api/season/[[...params]].js");
+const seasonHandler = require("../api/_lib/season.js");
 const studioHandler = require("../api/studio/[studio].js");
 const staffHandler = require("../api/staff/[staff].js");
 const indexHandler = require("../api/index.js");
+const catActionHandler = require("../api/[category]/[action].js");
 
 let PASS = 0;
 let FAIL = 0;
@@ -44,10 +45,38 @@ async function call(handler, query) {
   return { status: res.statusCode, headers: res.headers, body };
 }
 
+// Season lib takes explicit segs (mirrors how Vercel injects path segments:
+// [season]/[year].js passes [season, year]; the [category]/[action] catch-all
+// passes [action] for 1-segment shapes)
+async function callSeason(segs, query) {
+  const res = makeRes();
+  await seasonHandler(makeReq(query || {}), res, segs);
+  let body = null;
+  try { body = JSON.parse(res.body); } catch (e) { /* leave null */ }
+  return { status: res.statusCode, headers: res.headers, body };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 (async () => {
+  // Preflight: wait out AniList's occasional full-API disablements
+  for (let i = 1; i <= 10; i++) {
+    const probe = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ query: "query { Page(page:1, perPage:1) { media(id: 1) { id } } }" }),
+    });
+    const pj = await probe.json().catch(() => null);
+    const disabled = !pj || (pj.errors && /disabled/i.test(pj.errors[0]?.message || ""));
+    if (!disabled) { console.log(`preflight: AniList healthy (attempt ${i})`); break; }
+    console.log(`preflight: AniList disabled (attempt ${i}) — waiting 30s`);
+    if (i === 10) { console.error("AniList still down after 5 min — rerun later (NOT a code bug)"); process.exit(3); }
+    await sleep(30000);
+  }
+
   console.log("\n=== SEASON ===");
   {
-    const r = await call(seasonHandler, { params: ["winter", "2026"] });
+    const r = await callSeason(["winter", "2026"]);
     ok("WINTER/2026 -> 200", r.status === 200, `got ${r.status}`);
     ok("data.Page present", !!(r.body && r.body.data && r.body.data.Page));
     ok("data.Page.media array", Array.isArray(r.body && r.body.data && r.body.data.Page.media));
@@ -59,16 +88,16 @@ async function call(handler, query) {
     ok("cache-control edge header", (r.headers["cache-control"] || "").includes("s-maxage=14400"));
 
     // cache read: exact same request again (in-memory, same process)
-    const r2 = await call(seasonHandler, { params: ["winter", "2026"] });
+    const r2 = await callSeason(["winter", "2026"]);
     ok("repeat -> cache.hit=true", r2.body.cache.hit === true);
     ok("repeat -> same count", r2.body.count === r.body.count);
 
     // case normalization: /WINTER/2026 shares the same cache entry
-    const r3 = await call(seasonHandler, { params: ["WINTER", "2026"] });
+    const r3 = await callSeason(["WINTER", "2026"]);
     ok("/WINTER case-insensitive shares cache", r3.body.cache.hit === true);
 
     // param change -> fresh fetch (new key)
-    const r4 = await call(seasonHandler, { params: ["winter", "2026"], perPage: "3", sort: "SCORE_DESC" });
+    const r4 = await callSeason(["winter", "2026"], { perPage: "3", sort: "SCORE_DESC" });
     ok("param change -> cache.hit=false", r4.body.cache.hit === false);
     ok("perPage=3 honored", r4.body.count <= 3);
     const scores = (r4.body.data.Page.media || []).map((x) => x.averageScore || 0);
@@ -76,7 +105,7 @@ async function call(handler, query) {
     ok("applied echoes sort", Array.isArray(r4.body.applied.sort) && r4.body.applied.sort[0] === "SCORE_DESC");
 
     // filters
-    const r5 = await call(seasonHandler, { params: ["spring", "2025"], format: "TV", genres: "action,comedy", minScore: "70", perPage: "10" });
+    const r5 = await callSeason(["spring", "2025"], { format: "TV", genres: "action,comedy", minScore: "70", perPage: "10" });
     ok("filtered -> 200", r5.status === 200);
     const ms = r5.body.data.Page.media || [];
     ok("all format=TV", ms.every((x) => x.format === "TV"), JSON.stringify([...new Set(ms.map((x) => x.format))]));
@@ -84,33 +113,36 @@ async function call(handler, query) {
     ok("all minScore>=70", ms.every((x) => (x.averageScore || 0) >= 70));
 
     // nsfw default vs nsfw=true (applied echo only — data diff not assertable reliably)
-    const r6 = await call(seasonHandler, { params: ["fall", "2026"], nsfw: "true", perPage: "5" });
+    const r6 = await callSeason(["fall", "2026"], { nsfw: "true", perPage: "5" });
     ok("nsfw=true applied echo", r6.body.applied.nsfw === true);
 
     // current
-    const rc = await call(seasonHandler, { params: ["current"] });
+    const rc = await callSeason(["current"]);
+    ok("/current via [category]/[action] catch-all too", (await call(catActionHandler, { category: "season", action: "current" })).status === 200);
     ok("/current -> 200", rc.status === 200);
     ok("/current resolves JST season (2026-10 => FALL 2026)", rc.body.applied.season === "FALL" && rc.body.applied.seasonYear === 2026, JSON.stringify(rc.body.applied));
     ok("/current resolvedFrom note", /current/i.test(rc.body.applied.resolvedFrom || ""));
 
     // usage doc
-    const ru = await call(seasonHandler, {});
+    const ru = await callSeason([]);
     ok("/api/season bare -> usage 200", ru.status === 200 && !!ru.body.usage);
 
     // bad requests
-    const rb1 = await call(seasonHandler, { params: ["notaseason", "2026"] });
+    const rb1 = await callSeason(["notaseason", "2026"]);
     ok("bad season -> 400", rb1.status === 400, `got ${rb1.status}`);
     ok("bad season -> data.Page null", rb1.body.data && rb1.body.data.Page === null);
-    const rb2 = await call(seasonHandler, { params: ["winter", "abcd"] });
+    const rb2 = await callSeason(["winter", "abcd"]);
     ok("bad year -> 400", rb2.status === 400);
-    const rb3 = await call(seasonHandler, { params: ["winter", "1850"] });
+    const rb3 = await callSeason(["winter", "1850"]);
     ok("year out of range -> 400", rb3.status === 400);
-    const rb4 = await call(seasonHandler, { params: ["winter", "2026"], format: "TELEVISION" });
+    const rb4 = await callSeason(["winter", "2026"], { format: "TELEVISION" });
     ok("bad format -> 400 (no upstream burn)", rb4.status === 400 && /Allowed:/.test(rb4.body.error || ""));
-    const rb5 = await call(seasonHandler, { params: ["winter", "2026"], status: "AIRING" });
+    const rb5 = await callSeason(["winter", "2026"], { status: "AIRING" });
     ok("bad status -> 400", rb5.status === 400);
-    const rb6 = await call(seasonHandler, { params: ["winter", "2026", "extra"] });
+    const rb6 = await callSeason(["winter", "2026", "extra"]);
     ok("too many segments -> 400", rb6.status === 400);
+    const rb7 = await callSeason(["winter"]);
+    ok("season without year -> 400 usage hint", rb7.status === 400 && /api\/season/.test(rb7.body?.error || ""));
   }
 
   console.log("\n=== STUDIO ===");

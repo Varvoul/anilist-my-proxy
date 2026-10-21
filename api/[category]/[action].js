@@ -1,23 +1,18 @@
-// GET /api/{id}/full, /api/{id}/episodes  and  /api/{id}/relations
-// Generic item-level routes: the numeric id is auto-detected as a MyAnimeList
-// id or an AniList id (see api/_lib/media.js). Explicit-source alternatives:
-// /api/mal/{mal_id}/... and /api/anilist/{anilist_id}/... (recommended —
-// deterministic, no ambiguity).
+// GET /api/{category}/{action} catch-all — serves the generic numeric-item
+// routes (/api/{id}/full, /api/{id}/episodes, /api/{id}/relations — see
+// _lib/item-route.js) AND delegates the /api/season/{one-segment} shapes:
 //
-// Routing note: this lives at api/[category]/[action].js because Vercel
-// requires the first dynamic segment name to match the existing
-// api/[category].js route ([id] would conflict with [category]).
-// Vercel injects the segments as req.query.category + req.query.action.
+//   /api/season/current      -> current JST season/year (via _lib/season.js)
+//   /api/season/winter       -> 400 with the usage hint (missing year)
 //
-//   /api/11061/full          -> full Jikan-style metadata (HxH 2011; valid as both id types)
-//   /api/52991/full          -> MAL id lookup (Sousou no Frieren)
-//   /api/11061/relations     -> all related entries (prequel/sequel/...), AniList style
-//   /api/21/episodes?page=2&perPage=10
-//
-// Query parameters:
-//   idType=anilist|mal   force how the numeric id is interpreted
-//   page / perPage       episodes pagination (perPage defaults to 50, max 50)
-//   refresh=true|1       bypass the 4-hour cache and refetch from AniList
+// (The full /api/season/{season}/{year} route is api/season/[season]/[year].js,
+// a plain 2-dynamic-segment file — optional catch-alls proved unreliable.)
 const itemRoute = require("../_lib/item-route");
+const seasonHandler = require("../_lib/season");
 
-module.exports = (req, res) => itemRoute(req, res, null);
+module.exports = (req, res) => {
+  if (req.query.category === "season") {
+    return seasonHandler(req, res, req.query.action ? [req.query.action] : []);
+  }
+  return itemRoute(req, res, null);
+};

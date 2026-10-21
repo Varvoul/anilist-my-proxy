@@ -6,9 +6,18 @@
 //   /api/season/current            — resolves the current JST season/year
 //   /api/season                    — this usage doc
 //
-// Built as ONE optional catch-all function (api/season/[[...params]].js) to
-// conserve serverless functions — this deployment sits near the Vercel Hobby
-// 12-function cap (see api/[category].js header).
+// ROUTING (Vercel Hobby 12-function cap, see api/[category].js header):
+//   - /api/season/{season}/{year} -> api/season/[season]/[year].js (thin wrapper)
+//   - /api/season/current and /api/season/{one-segment} fall through to the
+//     existing api/[category]/[action].js catch-all, which delegates HERE with
+//     the segment it received.
+//   - A live-prod lesson (2026-10-21): an api/season/[[...params]].js optional
+//     catch-all WORKED right after deploy, then Vercel's router started
+//     answering NOT_FOUND for every 2-segment path and serving the function
+//     with EMPTY params for 1-segment paths — same deployment (dpl_FVhrvv...),
+//     no rebuild. Optional catch-alls inside a static subdirectory are
+//     unreliable on the current router build; this module exists so every URL
+//     shape is served by boring, well-proven plain-dynamic routes instead.
 //
 // PARAMETERS / FILTERS (AniList Media query args, all optional):
 //   page=1               1-indexed page
@@ -51,7 +60,7 @@ const {
   cacheGet, cacheSet, cacheKey, cacheInfo, respond, corsPreflight, methodGuard,
   clampInt, isTrue, enumList, firstEnum, genreVars, tagIn, parseFuzzyDateInt, cleanVars,
   currentSeasonJST,
-} = require("../_lib/entity");
+} = require("./entity");
 
 const LANDING = "/api/season";
 const YEAR_MIN = 1960;
@@ -140,14 +149,16 @@ function badRequest(res, error, hint) {
   }, "no-store");
 }
 
-module.exports = async (req, res) => {
+// segs: []            -> usage doc        (from api/[category].js, /api/season)
+//       ["current"]   -> current season   (from api/[category]/[action].js)
+//       ["{season}"]  -> 400 usage hint   (missing year)
+//       ["{season}","{year}"] -> data     (from api/season/[season]/[year].js)
+module.exports = async (req, res, segs) => {
   if (corsPreflight(req, res)) return;
   if (methodGuard(req, res, LANDING)) return;
 
   const query = req.query || {};
-  // Optional catch-all segments: /api/season -> [] ; /api/season/current -> ["current"]
-  // /api/season/winter/2026 -> ["winter","2026"] (Vercel injects req.query.params)
-  const segs = Array.isArray(query.params) ? query.params : query.params ? [query.params] : [];
+  segs = (Array.isArray(segs) ? segs : [segs]).filter((s) => s !== undefined && s !== null && s !== "");
 
   if (!segs.length) return usage(res);
 
