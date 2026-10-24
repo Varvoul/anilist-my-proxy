@@ -280,7 +280,9 @@ function canonGenre(raw) {
 
 function genreVars(query) {
   // genre=Action (single) | genre=Action,Comedy or genres=... (multi -> genre_in)
-  const raw = query.genre || query.genres || null;
+  // t133: `genre_in` is documented as accepted (season.js header) but was never
+  // parsed — honor it too, comma-separated canonical genre names.
+  const raw = query.genre || query.genres || query.genre_in || null;
   if (!raw) return { genre: null, genre_in: null };
   const parts = String(raw).split(",").map(canonGenre).filter(Boolean);
   if (parts.length === 1) return { genre: parts[0], genre_in: null };
