@@ -10,5 +10,8 @@
 // plain [param] segment files (schedule/[day], studio/[studio], staff/[staff])
 // never exhibited this. Keep this route boring.
 const seasonHandler = require("../../_lib/season");
+const { withAuth } = require("../../_lib/auth");
 
-module.exports = (req, res) => seasonHandler(req, res, [req.query.season, req.query.year]);
+const originalHandler = (req, res) => seasonHandler(req, res, [req.query.season, req.query.year]);
+
+module.exports = withAuth(originalHandler);

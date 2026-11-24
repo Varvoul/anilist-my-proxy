@@ -38,6 +38,7 @@ const {
   cacheGet, cacheSet, cacheKey, cacheInfo, respond, corsPreflight, methodGuard,
   clampInt, isTrue, enumList, cleanVars, lookupEntity,
 } = require("../_lib/entity");
+const { withAuth } = require("../_lib/auth");
 
 const LANDING = "/api/studio";
 
@@ -62,7 +63,7 @@ ${MEDIA_FIELDS}
 }
 `;
 
-module.exports = async (req, res) => {
+const originalHandler = async (req, res) => {
   if (corsPreflight(req, res)) return;
   if (methodGuard(req, res, LANDING)) return;
 
@@ -165,3 +166,5 @@ module.exports = async (req, res) => {
     }, "no-store");
   }
 };
+
+module.exports = withAuth(originalHandler);

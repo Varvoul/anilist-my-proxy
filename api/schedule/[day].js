@@ -57,6 +57,7 @@
 //     appearing as "upcoming" for at most that long. Absolute airingAt never
 //     lies — render state from it.
 const { cacheGet, cacheSet, TTL_MS } = require("../_lib/cache");
+const { withAuth } = require("../_lib/auth");
 
 const LANDING_PATH = "/api/schedule";
 const WINDOW_DAYS = 8;            // rolling window length (days)
@@ -404,7 +405,7 @@ function appliedEcho(q) {
 // -----------------------------------------------------------------------------
 // Handler
 // -----------------------------------------------------------------------------
-module.exports = async (req, res) => {
+const originalHandler = async (req, res) => {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -515,6 +516,8 @@ module.exports = async (req, res) => {
     }, "no-store");
   }
 };
+
+module.exports = withAuth(originalHandler);
 
 function respond(res, status, body, cacheControl) {
   res.statusCode = status;

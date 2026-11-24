@@ -9,10 +9,13 @@
 // a plain 2-dynamic-segment file — optional catch-alls proved unreliable.)
 const itemRoute = require("../_lib/item-route");
 const seasonHandler = require("../_lib/season");
+const { withAuth } = require("../_lib/auth");
 
-module.exports = (req, res) => {
+const originalHandler = (req, res) => {
   if (req.query.category === "season") {
     return seasonHandler(req, res, req.query.action ? [req.query.action] : []);
   }
   return itemRoute(req, res, null);
 };
+
+module.exports = withAuth(originalHandler);

@@ -37,6 +37,7 @@ const {
   jsonResponse,
   parseFuzzyDateInt,
 } = require("../_lib/anilist");
+const { withAuth } = require("../_lib/auth");
 
 const LANDING_PATH = "/api/anime/recommendations";
 
@@ -276,7 +277,7 @@ async function fetchAnilist2(query, variables) {
   }
 }
 
-module.exports = async (req, res) => {
+const originalHandler = async (req, res) => {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -334,3 +335,5 @@ module.exports = async (req, res) => {
     }, "no-store");
   }
 };
+
+module.exports = withAuth(originalHandler);

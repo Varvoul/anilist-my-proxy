@@ -9,5 +9,8 @@
 // Query parameters: page / perPage (episodes), refresh=true|1. See /api landing.
 // Responses are cached server-side for 4 hours + CDN s-maxage=14400.
 const itemRoute = require("../../_lib/item-route");
+const { withAuth } = require("../../_lib/auth");
 
-module.exports = (req, res) => itemRoute(req, res, "anilist");
+const originalHandler = (req, res) => itemRoute(req, res, "anilist");
+
+module.exports = withAuth(originalHandler);

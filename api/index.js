@@ -2,6 +2,7 @@
 // Lists every available category endpoint in this proxy, plus the shared
 // query-parameter schema. Useful as a self-documenting landing page.
 const { jsonResponse } = require("./_lib/anilist");
+const { withAuth } = require("./_lib/auth");
 
 const CATEGORIES = [
   { path: "/api/currently-airing",  defaults: { status: "RELEASING",          sort: ["POPULARITY_DESC"] },  description: "Anime currently broadcasting, sorted by popularity." },
@@ -266,7 +267,7 @@ const BROWSE_ENDPOINTS = [
   },
 ];
 
-module.exports = (req, res) => {
+const originalHandler = (req, res) => {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -305,3 +306,5 @@ module.exports = (req, res) => {
       "Every entry in the `data` array contains: id (AniList), idMal (MyAnimeList), title, coverImage, bannerImage, episodes, duration, status, season, seasonYear, format, source, averageScore, meanScore, popularity, favourites, startDate, endDate, nextAiringEpisode, genres, studios, siteUrl, trailer.",
   });
 };
+
+module.exports = withAuth(originalHandler);

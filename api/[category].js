@@ -18,6 +18,7 @@
 //   2. (Optional) Add a corresponding doc row in /api/index.js.
 //   3. Commit + push. Vercel auto-deploys. No new file needed.
 const { buildHandler } = require("./_lib/anilist");
+const { withAuth } = require("./_lib/auth");
 
 const CATEGORIES = {
   "currently-airing": {
@@ -93,7 +94,7 @@ const CATEGORIES = {
 };
 
 // Vercel passes the route parameter as `req.query.category`.
-module.exports = (req, res) => {
+const originalHandler = (req, res) => {
   // Vercel may also expose it under req.params depending on the runtime version.
   const categoryKey = (req.query && req.query.category) || (req.params && req.params.category);
 
@@ -112,3 +113,5 @@ module.exports = (req, res) => {
   const handler = buildHandler(config);
   return handler(req, res);
 };
+
+module.exports = withAuth(originalHandler);

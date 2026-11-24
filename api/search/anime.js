@@ -13,6 +13,7 @@
 // the query space is unbounded and the shared cache's fixed 4h TTL would be too
 // sticky for search results.
 const { jsonResponse } = require("../_lib/anilist");
+const { withAuth } = require("../_lib/auth");
 
 const ANILIST_GRAPHQL_URL = "https://graphql.anilist.co";
 const SOURCE_LINE = "AniList GraphQL API (https://graphql.anilist.co)";
@@ -76,7 +77,7 @@ async function postGraphql(query, variables, timeoutMs) {
   }
 }
 
-module.exports = async (req, res) => {
+const originalHandler = async (req, res) => {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -132,3 +133,5 @@ module.exports = async (req, res) => {
     }, { cacheControl: "no-store" });
   }
 };
+
+module.exports = withAuth(originalHandler);
